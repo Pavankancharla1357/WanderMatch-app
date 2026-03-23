@@ -64,11 +64,15 @@
       "properties": {
         "trip_id": { "type": "string" },
         "title": { "type": "string" },
-        "description": { "type": "string" },
+        "location": { "type": "string" },
         "time": { "type": "string" },
         "day": { "type": "integer" },
         "votes": { "type": "array", "items": { "type": "string" } },
-        "created_by": { "type": "string" }
+        "votes_count": { "type": "integer" },
+        "created_by": { "type": "string" },
+        "created_by_name": { "type": "string" },
+        "status": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["trip_id", "title", "day"]
     },
@@ -87,6 +91,7 @@
         "current_members": { "type": "integer" },
         "travel_style": { "type": "string" },
         "description": { "type": "string" },
+        "itinerary": { "type": "string" },
         "is_women_only": { "type": "boolean" },
         "status": { "type": "string", "enum": ["open", "full", "ongoing", "completed", "cancelled"] },
         "created_at": { "type": "string", "format": "date-time" }

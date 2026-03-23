@@ -1,13 +1,93 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db } from '../../firebase';
-import { doc, getDoc, collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
+import { 
+  doc, 
+  getDoc, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  addDoc, 
+  serverTimestamp, 
+  deleteDoc 
+} from 'firebase/firestore';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { JoinRequestModal } from '../../components/Trips/JoinRequestModal';
 import { EditTripModal } from '../../components/Trips/EditTripModal';
+import { DeleteTripModal } from '../../components/Trips/DeleteTripModal';
 import { ItineraryPlanner } from '../../components/Trips/ItineraryPlanner';
-import { Calendar, Users, IndianRupee, MapPin, ChevronLeft, Shield, Star, MessageSquare, UserPlus, Check, Edit2, User, LayoutGrid, Map as MapIcon, Heart } from 'lucide-react';
+import { 
+  Calendar, 
+  Users, 
+  IndianRupee, 
+  MapPin, 
+  ChevronLeft, 
+  Shield, 
+  Star, 
+  MessageSquare, 
+  UserPlus, 
+  Check, 
+  Edit2, 
+  Trash2, 
+  User, 
+  LayoutGrid, 
+  Map as MapIcon, 
+  Heart,
+  AlertCircle
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export const TripDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -20,8 +100,39 @@ export const TripDetails: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'itinerary'>('overview');
   const [messaging, setMessaging] = useState(false);
+
+  const getDestinationImage = (city: string) => {
+    const cityLower = city.toLowerCase();
+    const images: Record<string, string> = {
+      'leh': 'https://images.unsplash.com/photo-1581791534721-e599df4417f7?auto=format&fit=crop&w=1920&q=80',
+      'ladakh': 'https://images.unsplash.com/photo-1581791534721-e599df4417f7?auto=format&fit=crop&w=1920&q=80',
+      'manali': 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?auto=format&fit=crop&w=1920&q=80',
+      'nandi hills': 'https://images.unsplash.com/photo-1600100397608-f010f423b971?auto=format&fit=crop&w=1920&q=80',
+      'goa': 'https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=1920&q=80',
+      'jaipur': 'https://images.unsplash.com/photo-1599661046289-e31897846e41?auto=format&fit=crop&w=1920&q=80',
+      'udaipur': 'https://images.unsplash.com/photo-1585129819171-806f086600fd?auto=format&fit=crop&w=1920&q=80',
+      'mumbai': 'https://images.unsplash.com/photo-1529253355930-ddbe423a2ac7?auto=format&fit=crop&w=1920&q=80',
+      'delhi': 'https://images.unsplash.com/photo-1587474260584-136574528ed5?auto=format&fit=crop&w=1920&q=80',
+      'bangalore': 'https://images.unsplash.com/photo-1596176530529-78163a4f7af2?auto=format&fit=crop&w=1920&q=80',
+      'bengaluru': 'https://images.unsplash.com/photo-1596176530529-78163a4f7af2?auto=format&fit=crop&w=1920&q=80',
+      'kerala': 'https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=1920&q=80',
+      'rishikesh': 'https://images.unsplash.com/photo-1598977123418-45205553f40e?auto=format&fit=crop&w=1920&q=80',
+      'bali': 'https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=1920&q=80',
+      'paris': 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=1920&q=80',
+      'london': 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=1920&q=80',
+      'new york': 'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?auto=format&fit=crop&w=1920&q=80',
+      'tokyo': 'https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1920&q=80',
+    };
+
+    for (const [key, url] of Object.entries(images)) {
+      if (cityLower.includes(key)) return url;
+    }
+
+    return 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1920&q=80';
+  };
 
   const handleMessageOrganizer = async () => {
     if (!user || !trip?.organizer_id || user.uid === trip.organizer_id) return;
@@ -64,6 +175,119 @@ export const TripDetails: React.FC = () => {
       console.error('Error initiating chat:', error);
     } finally {
       setMessaging(false);
+    }
+  };
+
+  const handleDeleteTrip = async () => {
+    if (!id || !isOrganizer) return;
+    
+    try {
+      // 1. Delete all trip members
+      const membersQ = query(collection(db, 'trip_members'), where('trip_id', '==', id));
+      let membersSnapshot;
+      try {
+        membersSnapshot = await getDocs(membersQ);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.GET, 'trip_members');
+        return; // handleFirestoreError throws, but for TS
+      }
+      
+      const memberDeletions = membersSnapshot.docs.map(d => 
+        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `trip_members/${d.id}`))
+      );
+      
+      // 2. Delete all messages for this trip (group chat)
+      const messagesQ = query(collection(db, 'messages'), where('channel_id', '==', id));
+      let messagesSnapshot;
+      try {
+        messagesSnapshot = await getDocs(messagesQ);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.GET, 'messages');
+        return;
+      }
+      
+      const messageDeletions = messagesSnapshot.docs.map(d => 
+        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `messages/${d.id}`))
+      );
+
+      // 3. Delete itinerary items (subcollection)
+      const itineraryQ = collection(db, 'trips', id, 'itinerary');
+      let itinerarySnapshot;
+      try {
+        itinerarySnapshot = await getDocs(itineraryQ);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.GET, `trips/${id}/itinerary`);
+        return;
+      }
+      
+      const itineraryDeletions = itinerarySnapshot.docs.map(d => 
+        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `trips/${id}/itinerary/${d.id}`))
+      );
+
+      // 4. Delete expenses (subcollection)
+      const expensesQ = collection(db, 'trips', id, 'expenses');
+      let expensesSnapshot;
+      try {
+        expensesSnapshot = await getDocs(expensesQ);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.GET, `trips/${id}/expenses`);
+        return;
+      }
+      
+      const expenseDeletions = expensesSnapshot.docs.map(d => 
+        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `trips/${id}/expenses/${d.id}`))
+      );
+
+      // 5. Delete polls (related to the trip channel)
+      const pollsQ = query(collection(db, 'polls'), where('channel_id', '==', id));
+      let pollsSnapshot;
+      try {
+        pollsSnapshot = await getDocs(pollsQ);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.GET, 'polls');
+        return;
+      }
+      
+      const pollDeletions = pollsSnapshot.docs.map(d => 
+        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `polls/${d.id}`))
+      );
+
+      // 6. Delete the channel document
+      const channelRef = doc(db, 'channels', id);
+      let channelDoc;
+      try {
+        channelDoc = await getDoc(channelRef);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.GET, `channels/${id}`);
+        return;
+      }
+      
+      let channelDeletion = null;
+      if (channelDoc.exists()) {
+        channelDeletion = deleteDoc(channelRef).catch(e => handleFirestoreError(e, OperationType.DELETE, `channels/${id}`));
+      }
+
+      // Execute all deletions
+      await Promise.all([
+        ...memberDeletions,
+        ...messageDeletions,
+        ...itineraryDeletions,
+        ...expenseDeletions,
+        ...pollDeletions,
+        ...(channelDeletion ? [channelDeletion] : [])
+      ]);
+
+      // 7. Finally delete the trip document itself
+      try {
+        await deleteDoc(doc(db, 'trips', id));
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, `trips/${id}`);
+      }
+      
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Error deleting trip:', error);
+      throw error;
     }
   };
 
@@ -133,7 +357,7 @@ export const TripDetails: React.FC = () => {
       {/* Hero Image */}
       <div className="relative h-96 bg-gray-200">
         <img
-          src={trip.cover_image || `https://picsum.photos/seed/${trip.destination_city}/1920/1080`}
+          src={trip.cover_image || getDestinationImage(trip.destination_city)}
           alt={trip.destination_city}
           className="w-full h-full object-cover"
           referrerPolicy="no-referrer"
@@ -147,12 +371,21 @@ export const TripDetails: React.FC = () => {
         </button>
         
         {isOrganizer && (
-          <button
-            onClick={() => setShowEditModal(true)}
-            className="absolute top-6 right-6 px-6 py-3 bg-white text-indigo-600 rounded-2xl font-bold shadow-xl hover:bg-gray-50 transition-all flex items-center"
-          >
-            <Edit2 className="w-4 h-4 mr-2" /> Edit Trip
-          </button>
+          <div className="absolute top-6 right-6 flex space-x-3">
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="px-6 py-3 bg-white text-indigo-600 rounded-2xl font-bold shadow-xl hover:bg-gray-50 transition-all flex items-center"
+            >
+              <Edit2 className="w-4 h-4 mr-2" /> Edit Trip
+            </button>
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              className="p-3 bg-red-500/80 backdrop-blur-md text-white rounded-2xl font-bold shadow-xl hover:bg-red-600 transition-all flex items-center"
+              title="Delete Trip"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          </div>
         )}
       </div>
 
@@ -244,6 +477,17 @@ export const TripDetails: React.FC = () => {
                       {trip.description}
                     </p>
                   </div>
+
+                  {trip.itinerary && (
+                    <div className="mt-8 pt-8 border-t border-gray-50">
+                      <h3 className="text-xl font-bold text-gray-900 mb-4">Initial Itinerary</h3>
+                      <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100">
+                        <p className="text-gray-600 leading-relaxed whitespace-pre-wrap text-sm">
+                          {trip.itinerary}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100">
@@ -273,7 +517,12 @@ export const TripDetails: React.FC = () => {
               </>
             ) : (
               <div className="bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100">
-                <ItineraryPlanner tripId={id!} isMember={memberStatus === 'approved' || isOrganizer} />
+                <ItineraryPlanner 
+                  tripId={id!} 
+                  isMember={memberStatus === 'approved' || isOrganizer} 
+                  isOrganizer={isOrganizer}
+                  initialItinerary={trip.itinerary}
+                />
               </div>
             )}
           </div>
@@ -396,6 +645,12 @@ export const TripDetails: React.FC = () => {
             }}
           />
         )}
+        <DeleteTripModal
+          isOpen={showDeleteModal}
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleDeleteTrip}
+          tripName={`${trip.destination_city}, ${trip.destination_country}`}
+        />
       </AnimatePresence>
     </div>
   );

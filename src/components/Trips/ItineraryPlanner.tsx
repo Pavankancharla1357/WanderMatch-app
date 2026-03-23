@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, increment } from 'firebase/firestore';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, ThumbsUp, MapPin, Clock, Trash2, CheckCircle2 } from 'lucide-react';
@@ -9,12 +9,14 @@ import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorH
 interface ItineraryPlannerProps {
   tripId: string;
   isMember: boolean;
+  isOrganizer: boolean;
+  initialItinerary?: string;
 }
 
-export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMember }) => {
+export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMember, isOrganizer, initialItinerary }) => {
   const { user, profile } = useAuth();
   const [items, setItems] = useState<any[]>([]);
-  const [newItem, setNewItem] = useState({ title: '', location: '', time: '' });
+  const [newItem, setNewItem] = useState({ title: '', location: '', time: '', day: 1 });
   const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
@@ -31,9 +33,11 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
 
     try {
       await addDoc(collection(db, `trips/${tripId}/itinerary`), {
+        trip_id: tripId,
         title: newItem.title.trim(),
         location: newItem.location.trim(),
         time: newItem.time.trim(),
+        day: newItem.day,
         created_by: user.uid,
         created_by_name: profile?.name || 'Member',
         votes: [],
@@ -41,7 +45,7 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
         status: 'proposed',
         created_at: serverTimestamp()
       });
-      setNewItem({ title: '', location: '', time: '' });
+      setNewItem({ title: '', location: '', time: '', day: 1 });
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/itinerary`);
@@ -49,17 +53,26 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
   };
 
   const handleVote = async (itemId: string, hasVoted: boolean) => {
-    if (!user) return;
+    if (!user || !isMember) return;
     const itemRef = doc(db, `trips/${tripId}/itinerary`, itemId);
-    const item = items.find(i => i.id === itemId);
     
     try {
       await updateDoc(itemRef, {
         votes: hasVoted ? arrayRemove(user.uid) : arrayUnion(user.uid),
-        votes_count: hasVoted ? (item.votes_count - 1) : (item.votes_count + 1)
+        votes_count: increment(hasVoted ? -1 : 1)
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/itinerary/${itemId}`);
+    }
+  };
+
+  const handleDelete = async (itemId: string) => {
+    if (!window.confirm('Are you sure you want to delete this activity?')) return;
+    
+    try {
+      await deleteDoc(doc(db, `trips/${tripId}/itinerary`, itemId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `trips/${tripId}/itinerary/${itemId}`);
     }
   };
 
@@ -78,6 +91,15 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
         )}
       </div>
 
+      {initialItinerary && (
+        <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100">
+          <h4 className="text-sm font-bold text-indigo-900 mb-2 uppercase tracking-wider">Organizer's Initial Plan</h4>
+          <p className="text-indigo-700 text-sm whitespace-pre-wrap leading-relaxed">
+            {initialItinerary}
+          </p>
+        </div>
+      )}
+
       <AnimatePresence>
         {isAdding && (
           <motion.div
@@ -95,22 +117,35 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                 className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
                 required
               />
-              <div className="grid grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  value={newItem.location}
-                  onChange={(e) => setNewItem({ ...newItem, location: e.target.value })}
-                  placeholder="Location"
-                  className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
-                <input
-                  type="text"
-                  value={newItem.time}
-                  onChange={(e) => setNewItem({ ...newItem, time: e.target.value })}
-                  placeholder="Time/Day"
-                  className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <input
+                    type="text"
+                    value={newItem.location}
+                    onChange={(e) => setNewItem({ ...newItem, location: e.target.value })}
+                    placeholder="Location"
+                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newItem.day}
+                    onChange={(e) => setNewItem({ ...newItem, day: parseInt(e.target.value) || 1 })}
+                    placeholder="Day"
+                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                    required
+                  />
+                </div>
               </div>
+              <input
+                type="text"
+                value={newItem.time}
+                onChange={(e) => setNewItem({ ...newItem, time: e.target.value })}
+                placeholder="Time (e.g., 10:00 AM)"
+                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
@@ -155,6 +190,9 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                     )}
                   </div>
                   <div className="flex flex-wrap gap-4 text-xs text-gray-500 font-medium">
+                    <span className="flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-md">
+                      Day {item.day}
+                    </span>
                     {item.location && (
                       <span className="flex items-center">
                         <MapPin className="w-3 h-3 mr-1 text-indigo-500" />
@@ -173,6 +211,14 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                 </div>
 
                 <div className="flex items-center space-x-4 ml-6">
+                  {(isMember && (item.created_by === user?.uid || isOrganizer)) && (
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                   <div className="text-center">
                     <button
                       onClick={() => handleVote(item.id, hasVoted)}

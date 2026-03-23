@@ -22,6 +22,7 @@ export const CreateTrip: React.FC = () => {
     travel_style: 'mid_range',
     description: '',
     itinerary: '',
+    cover_image: '',
     trip_types: [] as string[],
     is_women_only: false,
   });
@@ -234,6 +235,20 @@ export const CreateTrip: React.FC = () => {
                 className="w-full px-4 py-3 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none hover:border-indigo-300 transition-all"
                 placeholder="Describe your trip, planned activities, and what kind of companions you're looking for..."
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center">
+                <Plane className="w-4 h-4 mr-2 text-indigo-600" /> Cover Image URL (Optional)
+              </label>
+              <input
+                type="url"
+                value={formData.cover_image}
+                onChange={(e) => setFormData({ ...formData, cover_image: e.target.value })}
+                className="w-full px-4 py-3 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none hover:border-indigo-300 transition-all"
+                placeholder="https://images.unsplash.com/photo-..."
+              />
+              <p className="mt-1 text-xs text-gray-400">Provide a direct link to an image. If left empty, we'll find a beautiful photo of your destination!</p>
             </div>
 
             <div>

@@ -38,97 +38,101 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 export default function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <div className="min-h-screen bg-gray-50">
-          <Navbar />
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route 
-              path="/profile/setup" 
-              element={
-                <ProtectedRoute>
-                  <ProfileSetup />
-                </ProtectedRoute>
-              } 
-            />
-            <Route path="/discover" element={<DiscoverTrips />} />
-            <Route 
-              path="/buddy-finder" 
-              element={
-                <ProtectedRoute>
-                  <BuddyFinder />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/trips/create" 
-              element={
-                <ProtectedRoute>
-                  <CreateTrip />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/messages" 
-              element={
-                <ProtectedRoute>
-                  <ChatList />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/messages/:channelId" 
-              element={
-                <ProtectedRoute>
-                  <ChatRoom />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/trips/:id/expenses" 
-              element={
-                <ProtectedRoute>
-                  <TripExpenses />
-                </ProtectedRoute>
-              } 
-            />
-            {/* Placeholder for other routes */}
-            <Route 
-              path="/profile" 
-              element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              } 
-            />
-            <Route path="/profile/:uid" element={<UserProfile />} />
-            <Route 
-              path="/dashboard" 
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/notifications" 
-              element={
-                <ProtectedRoute>
-                  <Notifications />
-                </ProtectedRoute>
-              } 
-            />
-            <Route path="/trips/:id" element={<TripDetails />} />
-          </Routes>
-        </div>
-      </Router>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <div className="min-h-screen bg-gray-50">
+            <Navbar />
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route 
+                path="/profile/setup" 
+                element={
+                  <ProtectedRoute>
+                    <ProfileSetup />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route path="/discover" element={<DiscoverTrips />} />
+              <Route 
+                path="/buddy-finder" 
+                element={
+                  <ProtectedRoute>
+                    <BuddyFinder />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/trips/create" 
+                element={
+                  <ProtectedRoute>
+                    <CreateTrip />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/messages" 
+                element={
+                  <ProtectedRoute>
+                    <ChatList />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/messages/:channelId" 
+                element={
+                  <ProtectedRoute>
+                    <ChatRoom />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/trips/:id/expenses" 
+                element={
+                  <ProtectedRoute>
+                    <TripExpenses />
+                  </ProtectedRoute>
+                } 
+              />
+              {/* Placeholder for other routes */}
+              <Route 
+                path="/profile" 
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route path="/profile/:uid" element={<UserProfile />} />
+              <Route 
+                path="/dashboard" 
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/notifications" 
+                element={
+                  <ProtectedRoute>
+                    <Notifications />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route path="/trips/:id" element={<TripDetails />} />
+            </Routes>
+          </div>
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

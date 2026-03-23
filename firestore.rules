@@ -124,7 +124,20 @@ service cloud.firestore {
       match /expenses/{expenseId} {
         allow read: if isAuthenticated();
         allow create: if isAuthenticated();
-        allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.paid_by;
+        allow update, delete: if isAuthenticated() && (
+          request.auth.uid == resource.data.paid_by ||
+          request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id
+        );
+      }
+
+      match /itinerary/{itemId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if isAuthenticated();
+        allow delete: if isAuthenticated() && (
+          request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id ||
+          request.auth.uid == resource.data.created_by
+        );
       }
     }
 
@@ -138,6 +151,10 @@ service cloud.firestore {
       allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
       allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participants;
       allow update: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      allow delete: if isAuthenticated() && (
+        exists(/databases/$(database)/documents/trips/$(channelId)) && 
+        request.auth.uid == get(/databases/$(database)/documents/trips/$(channelId)).data.organizer_id
+      );
     }
 
     match /messages/{messageId} {
@@ -145,6 +162,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && (
         request.resource.data.sender_id == request.auth.uid || 
         (request.resource.data.sender_id == 'system' && request.resource.data.message_type == 'system')
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.sender_id ||
+        (exists(/databases/$(database)/documents/trips/$(resource.data.channel_id)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.channel_id)).data.organizer_id)
       );
     }
 
@@ -179,6 +201,11 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']) &&
         request.resource.data.votes.diff(resource.data.votes).affectedKeys().hasOnly([request.auth.uid])
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.creator_id ||
+        (exists(/databases/$(database)/documents/trips/$(resource.data.channel_id)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.channel_id)).data.organizer_id)
       );
     }
     
