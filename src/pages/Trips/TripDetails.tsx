@@ -104,6 +104,11 @@ export const TripDetails: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'itinerary'>('overview');
   const [messaging, setMessaging] = useState(false);
 
+  // Always scroll to top when trip details page loads or trip id changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+  }, [id]);
+
   const getDestinationImage = (city: string) => {
     const cityLower = city.toLowerCase();
     const images: Record<string, string> = {
