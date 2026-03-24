@@ -54,7 +54,7 @@ service cloud.firestore {
       return isAuthenticated() &&
         ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-          (request.auth.token.email == "pavankancharla1357@gmail.com" && request.auth.token.email_verified == true));
+          (request.auth.token.email == "pavankancharla1357@gmail.com"));
     }
 
     function isValidEmail(email) {
@@ -107,17 +107,23 @@ service cloud.firestore {
       
       allow update: if isAuthenticated() && (
         request.auth.uid == resource.data.organizer_id || 
+        isAdmin() ||
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['current_members']))
       );
       
-      allow delete: if isAuthenticated() && request.auth.uid == resource.data.organizer_id;
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.organizer_id || isAdmin());
 
       match /members/{memberId} {
         allow read: if isAuthenticated();
         allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
         allow update: if isAuthenticated() && (
           request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id ||
-          request.auth.uid == resource.data.user_id
+          request.auth.uid == resource.data.user_id ||
+          isAdmin()
+        );
+        allow delete: if isAuthenticated() && (
+          request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id ||
+          isAdmin()
         );
       }
 
@@ -126,7 +132,8 @@ service cloud.firestore {
         allow create: if isAuthenticated();
         allow update, delete: if isAuthenticated() && (
           request.auth.uid == resource.data.paid_by ||
-          request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id
+          request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id ||
+          isAdmin()
         );
       }
 
@@ -136,7 +143,8 @@ service cloud.firestore {
         allow update: if isAuthenticated();
         allow delete: if isAuthenticated() && (
           request.auth.uid == get(/databases/$(database)/documents/trips/$(tripId)).data.organizer_id ||
-          request.auth.uid == resource.data.created_by
+          request.auth.uid == resource.data.created_by ||
+          isAdmin()
         );
       }
     }
@@ -148,12 +156,23 @@ service cloud.firestore {
     }
 
     match /channels/{channelId} {
-      allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      allow read: if isAuthenticated() && (
+        request.auth.uid in resource.data.participants || 
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/trips/$(channelId)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(channelId)).data.organizer_id)
+      );
       allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participants;
-      allow update: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      allow update: if isAuthenticated() && (
+        request.auth.uid in resource.data.participants || 
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/trips/$(channelId)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(channelId)).data.organizer_id)
+      );
       allow delete: if isAuthenticated() && (
-        exists(/databases/$(database)/documents/trips/$(channelId)) && 
-        request.auth.uid == get(/databases/$(database)/documents/trips/$(channelId)).data.organizer_id
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/trips/$(channelId)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(channelId)).data.organizer_id)
       );
     }
 
@@ -165,21 +184,22 @@ service cloud.firestore {
       );
       allow delete: if isAuthenticated() && (
         request.auth.uid == resource.data.sender_id ||
-        (exists(/databases/$(database)/documents/trips/$(resource.data.channel_id)) && 
-         request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.channel_id)).data.organizer_id)
+        isAdmin() ||
+        (resource.data.channel_id != null && exists(/databases/$(database)/documents/trips/$(resource.data.channel_id)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.channel_id)).data.organizer_id) ||
+        (resource.data.channel_id != null && exists(/databases/$(database)/documents/channels/$(resource.data.channel_id)) && 
+         request.auth.uid in get(/databases/$(database)/documents/channels/$(resource.data.channel_id)).data.participants)
       );
     }
 
     match /trip_members/{memberId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
-      allow update: if isAuthenticated() && (
-        request.auth.uid == get(/databases/$(database)/documents/trips/$(request.resource.data.trip_id)).data.organizer_id ||
-        request.auth.uid == resource.data.user_id
-      );
-      allow delete: if isAuthenticated() && (
-        request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.trip_id)).data.organizer_id ||
-        request.auth.uid == resource.data.user_id
+      allow update, delete: if isAuthenticated() && (
+        isAdmin() ||
+        request.auth.uid == resource.data.user_id ||
+        (resource.data.trip_id != null && exists(/databases/$(database)/documents/trips/$(resource.data.trip_id)) && 
+         request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.trip_id)).data.organizer_id)
       );
     }
     match /notifications/{notificationId} {
@@ -204,6 +224,7 @@ service cloud.firestore {
       );
       allow delete: if isAuthenticated() && (
         request.auth.uid == resource.data.creator_id ||
+        isAdmin() ||
         (exists(/databases/$(database)/documents/trips/$(resource.data.channel_id)) && 
          request.auth.uid == get(/databases/$(database)/documents/trips/$(resource.data.channel_id)).data.organizer_id)
       );

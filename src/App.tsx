@@ -38,14 +38,28 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+import { Toaster } from 'sonner';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { useEffect } from 'react';
+
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+};
 
 export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
         <Router>
+          <ScrollToTop />
           <div className="min-h-screen bg-gray-50">
+            <Toaster position="top-center" richColors />
             <Navbar />
             <Routes>
               <Route path="/" element={<Home />} />

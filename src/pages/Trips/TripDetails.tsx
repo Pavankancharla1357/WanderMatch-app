@@ -104,11 +104,6 @@ export const TripDetails: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'itinerary'>('overview');
   const [messaging, setMessaging] = useState(false);
 
-  // Always scroll to top when trip details page loads or trip id changes
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-  }, [id]);
-
   const getDestinationImage = (city: string) => {
     const cityLower = city.toLowerCase();
     const images: Record<string, string> = {
@@ -138,6 +133,10 @@ export const TripDetails: React.FC = () => {
 
     return 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1920&q=80';
   };
+
+  const isOrganizer = user?.uid && trip?.organizer_id && user.uid === trip.organizer_id;
+  const isAdminUser = currentUserProfile?.role === 'admin' || user?.email === 'pavankancharla1357@gmail.com';
+  const canManageTrip = isOrganizer || isAdminUser;
 
   const handleMessageOrganizer = async () => {
     if (!user || !trip?.organizer_id || user.uid === trip.organizer_id) return;
@@ -184,95 +183,139 @@ export const TripDetails: React.FC = () => {
   };
 
   const handleDeleteTrip = async () => {
-    if (!id || !isOrganizer) return;
+    if (!id || !canManageTrip) {
+      console.warn('Delete trip aborted: missing id or no permission', { id, canManageTrip });
+      return;
+    }
+    
+    console.log('handleDeleteTrip started for trip:', id, 'by user:', user?.uid);
     
     try {
       // 1. Delete all trip members
+      console.log('Step 1: Deleting trip members...');
       const membersQ = query(collection(db, 'trip_members'), where('trip_id', '==', id));
       let membersSnapshot;
       try {
         membersSnapshot = await getDocs(membersQ);
+        console.log(`Found ${membersSnapshot.size} members to delete`);
       } catch (e) {
+        console.error('Error fetching trip members:', e);
         handleFirestoreError(e, OperationType.GET, 'trip_members');
-        return; // handleFirestoreError throws, but for TS
+        return;
       }
       
       const memberDeletions = membersSnapshot.docs.map(d => 
-        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `trip_members/${d.id}`))
+        deleteDoc(d.ref).catch(e => {
+          console.error(`Failed to delete member ${d.id}:`, e);
+          handleFirestoreError(e, OperationType.DELETE, `trip_members/${d.id}`);
+        })
       );
       
       // 2. Delete all messages for this trip (group chat)
+      console.log('Step 2: Deleting messages...');
       const messagesQ = query(collection(db, 'messages'), where('channel_id', '==', id));
       let messagesSnapshot;
       try {
         messagesSnapshot = await getDocs(messagesQ);
+        console.log(`Found ${messagesSnapshot.size} messages to delete`);
       } catch (e) {
+        console.error('Error fetching messages:', e);
         handleFirestoreError(e, OperationType.GET, 'messages');
         return;
       }
       
       const messageDeletions = messagesSnapshot.docs.map(d => 
-        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `messages/${d.id}`))
+        deleteDoc(d.ref).catch(e => {
+          console.error(`Failed to delete message ${d.id}:`, e);
+          handleFirestoreError(e, OperationType.DELETE, `messages/${d.id}`);
+        })
       );
 
       // 3. Delete itinerary items (subcollection)
+      console.log('Step 3: Deleting itinerary items...');
       const itineraryQ = collection(db, 'trips', id, 'itinerary');
       let itinerarySnapshot;
       try {
         itinerarySnapshot = await getDocs(itineraryQ);
+        console.log(`Found ${itinerarySnapshot.size} itinerary items to delete`);
       } catch (e) {
+        console.error('Error fetching itinerary:', e);
         handleFirestoreError(e, OperationType.GET, `trips/${id}/itinerary`);
         return;
       }
       
       const itineraryDeletions = itinerarySnapshot.docs.map(d => 
-        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `trips/${id}/itinerary/${d.id}`))
+        deleteDoc(d.ref).catch(e => {
+          console.error(`Failed to delete itinerary item ${d.id}:`, e);
+          handleFirestoreError(e, OperationType.DELETE, `trips/${id}/itinerary/${d.id}`);
+        })
       );
 
       // 4. Delete expenses (subcollection)
+      console.log('Step 4: Deleting expenses...');
       const expensesQ = collection(db, 'trips', id, 'expenses');
       let expensesSnapshot;
       try {
         expensesSnapshot = await getDocs(expensesQ);
+        console.log(`Found ${expensesSnapshot.size} expenses to delete`);
       } catch (e) {
+        console.error('Error fetching expenses:', e);
         handleFirestoreError(e, OperationType.GET, `trips/${id}/expenses`);
         return;
       }
       
       const expenseDeletions = expensesSnapshot.docs.map(d => 
-        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `trips/${id}/expenses/${d.id}`))
+        deleteDoc(d.ref).catch(e => {
+          console.error(`Failed to delete expense ${d.id}:`, e);
+          handleFirestoreError(e, OperationType.DELETE, `trips/${id}/expenses/${d.id}`);
+        })
       );
 
       // 5. Delete polls (related to the trip channel)
+      console.log('Step 5: Deleting polls...');
       const pollsQ = query(collection(db, 'polls'), where('channel_id', '==', id));
       let pollsSnapshot;
       try {
         pollsSnapshot = await getDocs(pollsQ);
+        console.log(`Found ${pollsSnapshot.size} polls to delete`);
       } catch (e) {
+        console.error('Error fetching polls:', e);
         handleFirestoreError(e, OperationType.GET, 'polls');
         return;
       }
       
       const pollDeletions = pollsSnapshot.docs.map(d => 
-        deleteDoc(d.ref).catch(e => handleFirestoreError(e, OperationType.DELETE, `polls/${d.id}`))
+        deleteDoc(d.ref).catch(e => {
+          console.error(`Failed to delete poll ${d.id}:`, e);
+          handleFirestoreError(e, OperationType.DELETE, `polls/${d.id}`);
+        })
       );
 
       // 6. Delete the channel document
+      console.log('Step 6: Checking for channel document...');
       const channelRef = doc(db, 'channels', id);
       let channelDoc;
       try {
         channelDoc = await getDoc(channelRef);
       } catch (e) {
-        handleFirestoreError(e, OperationType.GET, `channels/${id}`);
-        return;
+        // If we can't even read the channel, it might be because it doesn't exist 
+        // or we don't have permission. We'll log it but try to proceed if it's just a "not found"
+        console.warn('Could not read channel document, it might not exist or permission denied:', e);
       }
       
       let channelDeletion = null;
-      if (channelDoc.exists()) {
-        channelDeletion = deleteDoc(channelRef).catch(e => handleFirestoreError(e, OperationType.DELETE, `channels/${id}`));
+      if (channelDoc?.exists()) {
+        console.log('Channel document found, adding to deletion list');
+        channelDeletion = deleteDoc(channelRef).catch(e => {
+          console.error(`Failed to delete channel ${id}:`, e);
+          handleFirestoreError(e, OperationType.DELETE, `channels/${id}`);
+        });
+      } else {
+        console.log('No channel document found for this trip ID');
       }
 
       // Execute all deletions
+      console.log('Step 7: Executing all deletions in parallel...');
       await Promise.all([
         ...memberDeletions,
         ...messageDeletions,
@@ -283,15 +326,18 @@ export const TripDetails: React.FC = () => {
       ]);
 
       // 7. Finally delete the trip document itself
+      console.log('Step 8: Deleting trip document...');
       try {
         await deleteDoc(doc(db, 'trips', id));
       } catch (e) {
+        console.error('Error deleting trip document:', e);
         handleFirestoreError(e, OperationType.DELETE, `trips/${id}`);
       }
       
+      console.log('Trip deletion successful, navigating to dashboard');
       navigate('/dashboard');
     } catch (error) {
-      console.error('Error deleting trip:', error);
+      console.error('Error in handleDeleteTrip:', error);
       throw error;
     }
   };
@@ -301,46 +347,43 @@ export const TripDetails: React.FC = () => {
 
     const fetchTripData = async () => {
       try {
-        const tripDoc = await getDoc(doc(db, 'trips', id));
+        // Parallel fetch trip and all members list
+        const [tripDoc, membersSnapshot] = await Promise.all([
+          getDoc(doc(db, 'trips', id)),
+          getDocs(query(collection(db, 'trip_members'), where('trip_id', '==', id)))
+        ]);
+
         if (tripDoc.exists()) {
           const tripData: any = { id: tripDoc.id, ...tripDoc.data() };
           setTrip(tripData);
 
-          // Fetch organizer profile
-          const orgDoc = await getDoc(doc(db, 'users', tripData.organizer_id));
+          // Check current user's membership status from the fetched list
+          if (user) {
+            const currentUserMember = membersSnapshot.docs.find(d => d.data().user_id === user.uid);
+            if (currentUserMember) {
+              setMemberStatus(currentUserMember.data().status);
+            }
+          }
+
+          // Get approved member UIDs
+          const approvedMemberUids = membersSnapshot.docs
+            .filter(d => d.data().status === 'approved')
+            .map(d => d.data().user_id);
+
+          // Parallel fetch organizer profile and all approved member profiles
+          const [orgDoc, ...memberProfileDocs] = await Promise.all([
+            getDoc(doc(db, 'users', tripData.organizer_id)),
+            ...approvedMemberUids.map(uid => getDoc(doc(db, 'users', uid)))
+          ]);
+
           if (orgDoc.exists()) {
             setOrganizer(orgDoc.data());
           }
 
-          // Fetch trip members
-          const membersQ = query(
-            collection(db, 'trip_members'),
-            where('trip_id', '==', id),
-            where('status', '==', 'approved')
+          setMembers(memberProfileDocs
+            .filter(p => p.exists())
+            .map(p => ({ uid: p.id, ...p.data() }))
           );
-          const membersSnapshot = await getDocs(membersQ);
-          const memberUids = membersSnapshot.docs.map(doc => doc.data().user_id);
-          
-          const memberProfiles = await Promise.all(
-            memberUids.map(async (uid) => {
-              const userDoc = await getDoc(doc(db, 'users', uid));
-              return userDoc.exists() ? { uid, ...userDoc.data() } : null;
-            })
-          );
-          setMembers(memberProfiles.filter(p => p !== null));
-
-          // Check current user's membership status
-          if (user) {
-            const q = query(
-              collection(db, 'trip_members'),
-              where('trip_id', '==', id),
-              where('user_id', '==', user.uid)
-            );
-            const snapshot = await getDocs(q);
-            if (!snapshot.empty) {
-              setMemberStatus(snapshot.docs[0].data().status);
-            }
-          }
         }
       } catch (error) {
         console.error('Error fetching trip details:', error);
@@ -352,10 +395,30 @@ export const TripDetails: React.FC = () => {
     fetchTripData();
   }, [id, user]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white pb-24 animate-pulse">
+        <div className="h-96 bg-gray-200" />
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-10">
+          <div className="flex space-x-4 mb-8">
+            <div className="w-32 h-12 bg-gray-200 rounded-2xl" />
+            <div className="w-32 h-12 bg-gray-200 rounded-2xl" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-8">
+              <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 h-64" />
+              <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 h-64" />
+            </div>
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-3xl shadow-xl border border-gray-100 h-48" />
+              <div className="bg-white p-6 rounded-3xl shadow-xl border border-gray-100 h-32" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!trip) return <div className="min-h-screen flex items-center justify-center">Trip not found</div>;
-
-  const isOrganizer = user?.uid === trip.organizer_id;
 
   return (
     <div className="min-h-screen bg-white pb-24">
@@ -375,7 +438,7 @@ export const TripDetails: React.FC = () => {
           <ChevronLeft className="w-6 h-6" />
         </button>
         
-        {isOrganizer && (
+        {canManageTrip && (
           <div className="absolute top-6 right-6 flex space-x-3">
             <button
               onClick={() => setShowEditModal(true)}

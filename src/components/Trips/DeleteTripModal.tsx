@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, AlertTriangle, Trash2 } from 'lucide-react';
 
+import { toast } from 'sonner';
+
 interface DeleteTripModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -16,8 +18,25 @@ export const DeleteTripModal: React.FC<DeleteTripModalProps> = ({ isOpen, onClos
     setIsDeleting(true);
     try {
       await onConfirm();
-    } catch (error) {
+      toast.success('Trip deleted successfully');
+    } catch (error: any) {
       console.error('Error deleting trip:', error);
+      let errorMessage = 'Failed to delete trip. Please try again.';
+      
+      try {
+        // Try to parse FirestoreErrorInfo if it's a JSON string
+        const errorInfo = JSON.parse(error.message);
+        if (errorInfo.error.includes('insufficient permissions')) {
+          errorMessage = 'You do not have permission to delete this trip or its associated data.';
+        }
+      } catch (e) {
+        // Not a JSON string, use the error message directly if it's simple
+        if (error.message && error.message.length < 100) {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setIsDeleting(false);
     }

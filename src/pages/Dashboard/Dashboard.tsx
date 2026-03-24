@@ -34,6 +34,8 @@ export const Dashboard: React.FC = () => {
             where('status', '==', 'pending')
           );
           const requestsSnapshot = await getDocs(requestsQ);
+          
+          // Parallel fetch all user profiles for these requests
           const requestsData = await Promise.all(
             requestsSnapshot.docs.map(async (docSnap) => {
               const data = docSnap.data();
@@ -110,6 +112,34 @@ export const Dashboard: React.FC = () => {
       console.error(`Error ${action} request:`, error);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20 animate-pulse">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
+            <div className="space-y-4">
+              <div className="h-10 bg-gray-200 rounded w-64" />
+              <div className="h-4 bg-gray-200 rounded w-48" />
+            </div>
+            <div className="w-48 h-14 bg-gray-200 rounded-2xl" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 space-y-8">
+              <div className="bg-white p-8 rounded-[2.5rem] h-64 shadow-xl" />
+              <div className="bg-white p-8 rounded-[2.5rem] h-96 shadow-xl" />
+            </div>
+            <div className="lg:col-span-2 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-8 rounded-[2.5rem] h-80 shadow-xl" />
+                <div className="bg-white p-8 rounded-[2.5rem] h-80 shadow-xl" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -206,11 +236,7 @@ export const Dashboard: React.FC = () => {
               <Link to="/discover" className="text-indigo-600 font-bold text-sm hover:underline">View All</Link>
             </div>
             
-            {loading ? (
-              <div className="flex justify-center py-20">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-              </div>
-            ) : myTrips.length > 0 ? (
+            {myTrips.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {myTrips.map(trip => (
                   <TripCard key={trip.id} trip={trip} />

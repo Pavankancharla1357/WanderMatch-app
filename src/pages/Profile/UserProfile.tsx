@@ -72,18 +72,15 @@ export const UserProfile: React.FC = () => {
 
     const fetchUserData = async () => {
       try {
-        const userDoc = await getDoc(doc(db, 'users', uid));
+        const [userDoc, tripsSnapshot, buddySnapshot] = await Promise.all([
+          getDoc(doc(db, 'users', uid)),
+          getDocs(query(collection(db, 'trips'), where('organizer_id', '==', uid))),
+          getDocs(query(collection(db, 'buddy_posts'), where('user_id', '==', uid), orderBy('created_at', 'desc')))
+        ]);
+
         if (userDoc.exists()) {
           setProfile(userDoc.data());
-          
-          // Fetch trips organized by this user
-          const tripsQ = query(collection(db, 'trips'), where('organizer_id', '==', uid));
-          const tripsSnapshot = await getDocs(tripsQ);
           setTrips(tripsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
-          // Fetch buddy posts by this user
-          const buddyQ = query(collection(db, 'buddy_posts'), where('user_id', '==', uid), orderBy('created_at', 'desc'));
-          const buddySnapshot = await getDocs(buddyQ);
           setBuddyPosts(buddySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }
       } catch (error) {
@@ -109,7 +106,32 @@ export const UserProfile: React.FC = () => {
     return `${baseUrls[platform]}${url.replace('@', '')}`;
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading profile...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20 animate-pulse">
+        <div className="h-64 bg-indigo-600" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-10">
+          <div className="bg-white rounded-[2.5rem] shadow-xl p-8 mb-8">
+            <div className="flex flex-col md:flex-row items-center md:items-end space-y-6 md:space-y-0 md:space-x-8">
+              <div className="w-40 h-40 bg-gray-200 rounded-3xl" />
+              <div className="flex-1 space-y-4">
+                <div className="h-8 bg-gray-200 rounded w-48" />
+                <div className="h-4 bg-gray-200 rounded w-32" />
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 space-y-8">
+              <div className="bg-white p-8 rounded-[2.5rem] h-64 shadow-xl" />
+            </div>
+            <div className="lg:col-span-2 space-y-8">
+              <div className="bg-white p-8 rounded-[2.5rem] h-96 shadow-xl" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   
   if (!profile) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 px-4">
