@@ -908,13 +908,13 @@ export const Profile: React.FC = () => {
                         Save Changes
                       </button>
                     </div>
-                  ) } (
+                  ) : (
                     <div className="relative">
-                      <div className="absolute -left-4 top-0 text-4xl text-indigo-100 font-serif">"</div>
+                      <div className="absolute -left-4 top-0 text-4xl text-indigo-100 font-serif">{"\""}</div>
                       <p className="text-sm sm:text-base text-gray-600 leading-relaxed font-medium pl-4">
                         {profile.bio || "Your travel story starts here. Add a bio to let others know who you are!"}
                       </p>
-                      <div className="absolute -right-2 bottom-0 text-4xl text-indigo-100 font-serif rotate-180">"</div>
+                      <div className="absolute -right-2 bottom-0 text-4xl text-indigo-100 font-serif rotate-180">{"\""}</div>
                     </div>
                   )}
                 </motion.div>
