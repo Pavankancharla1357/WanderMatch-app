@@ -908,7 +908,7 @@ export const Profile: React.FC = () => {
                         Save Changes
                       </button>
                     </div>
-                  ) : (
+                  ) } (
                     <div className="relative">
                       <div className="absolute -left-4 top-0 text-4xl text-indigo-100 font-serif">"</div>
                       <p className="text-sm sm:text-base text-gray-600 leading-relaxed font-medium pl-4">
