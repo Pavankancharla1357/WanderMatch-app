@@ -4,7 +4,7 @@ import { useAuth } from '../Auth/AuthContext';
 import { auth, db } from '../../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Compass, MessageSquare, User, LogOut, Menu, X, AlertCircle, Users } from 'lucide-react';
+import { Compass, MessageSquare, User, LogOut, Menu, X, AlertCircle, Users, Sparkles } from 'lucide-react';
 import { NotificationBell } from '../Notifications/NotificationBell';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -53,6 +53,10 @@ export const Navbar: React.FC = () => {
 
           {/* Desktop Menu */}
           <div className="hidden md:flex items-center space-x-8">
+            <Link to="/expert-planner" className="text-indigo-600 hover:text-indigo-700 font-bold transition-colors flex items-center gap-1">
+              <Sparkles className="w-4 h-4" />
+              AI Planner
+            </Link>
             <Link to="/discover" className="text-gray-600 hover:text-indigo-600 font-medium transition-colors">Discover</Link>
             <Link to="/buddy-finder" className="text-gray-600 hover:text-indigo-600 font-medium transition-colors flex items-center">
               <Users className="w-4 h-4 mr-1" />
@@ -107,6 +111,10 @@ export const Navbar: React.FC = () => {
       {/* Mobile Menu */}
       {isOpen && (
         <div className="md:hidden bg-white border-t border-gray-100 px-4 pt-2 pb-6 space-y-4 shadow-lg">
+          <Link to="/expert-planner" className="block text-indigo-600 font-bold py-2 flex items-center gap-2">
+            <Sparkles className="w-5 h-5" />
+            AI Expert Planner
+          </Link>
           <Link to="/discover" className="block text-gray-600 font-medium py-2">Discover</Link>
           <Link to="/buddy-finder" className="block text-gray-600 font-medium py-2">Buddy Finder</Link>
           {user ? (

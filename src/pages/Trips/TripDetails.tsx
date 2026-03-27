@@ -12,7 +12,8 @@ import {
   getDocs, 
   addDoc, 
   serverTimestamp, 
-  deleteDoc 
+  deleteDoc,
+  arrayUnion
 } from 'firebase/firestore';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { generateInviteCode } from '../../services/inviteService';
@@ -40,7 +41,6 @@ import {
   Map as MapIcon, 
   Heart,
   AlertCircle,
-  DollarSign,
   Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -190,6 +190,57 @@ export const TripDetails: React.FC = () => {
       console.error('Error initiating chat:', error);
     } finally {
       setMessaging(false);
+    }
+  };
+
+  const handleApproveMember = async (memberUid: string) => {
+    if (!id || !isOrganizer) return;
+    try {
+      const q = query(
+        collection(db, 'trip_members'),
+        where('trip_id', '==', id),
+        where('user_id', '==', memberUid)
+      );
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        await updateDoc(snapshot.docs[0].ref, { status: 'approved' });
+        await updateDoc(doc(db, 'trips', id), {
+          current_members: increment(1)
+        });
+        
+        // Add to group chat channel if it exists
+        const channelRef = doc(db, 'channels', id);
+        const channelSnap = await getDoc(channelRef);
+        if (channelSnap.exists()) {
+          await updateDoc(channelRef, {
+            participants: arrayUnion(memberUid)
+          });
+        }
+
+        // Update local state
+        setMembers(prev => prev.map(m => m.uid === memberUid ? { ...m, status: 'approved' } : m));
+      }
+    } catch (error) {
+      console.error('Error approving member:', error);
+    }
+  };
+
+  const handleRejectMember = async (memberUid: string) => {
+    if (!id || !isOrganizer) return;
+    try {
+      const q = query(
+        collection(db, 'trip_members'),
+        where('trip_id', '==', id),
+        where('user_id', '==', memberUid)
+      );
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        await deleteDoc(snapshot.docs[0].ref);
+        // Update local state
+        setMembers(prev => prev.filter(m => m.uid !== memberUid));
+      }
+    } catch (error) {
+      console.error('Error rejecting member:', error);
     }
   };
 
@@ -404,15 +455,16 @@ export const TripDetails: React.FC = () => {
           }
         }
 
-        // Identify approved members (excluding organizer for now to handle separately)
-        const approvedMemberIds = membersSnap.docs
-          .filter(d => d.data().status === 'approved' && d.data().user_id !== tripData.organizer_id)
+        // Identify members to fetch profiles for
+        const memberDocs = membersSnap.docs.filter(d => d.data().user_id !== tripData.organizer_id);
+        const memberIdsToFetch = memberDocs
+          .filter(d => d.data().status === 'approved' || (userIsOrganizer && d.data().status === 'pending'))
           .map(d => d.data().user_id);
 
         // Fetch profiles in parallel
         const profilePromises = [
           getDoc(doc(db, 'users', tripData.organizer_id)),
-          ...approvedMemberIds.map(uid => getDoc(doc(db, 'users', uid)))
+          ...memberIdsToFetch.map(uid => getDoc(doc(db, 'users', uid)))
         ];
 
         const profileSnaps = await Promise.all(profilePromises);
@@ -440,14 +492,19 @@ export const TripDetails: React.FC = () => {
         // Handle other members
         for (let i = 1; i < profileSnaps.length; i++) {
           const pSnap = profileSnaps[i];
+          const uid = memberIdsToFetch[i-1];
+          const mDoc = memberDocs.find(d => d.data().user_id === uid);
+          const status = mDoc?.data().status;
+
           if (pSnap.exists()) {
-            allMembers.push({ uid: pSnap.id, ...pSnap.data() });
+            allMembers.push({ uid: pSnap.id, ...pSnap.data(), status });
           } else {
             allMembers.push({
-              uid: approvedMemberIds[i-1],
+              uid,
               name: 'Traveler',
               photo_url: null,
-              is_verified: false
+              is_verified: false,
+              status
             });
           }
         }
@@ -670,10 +727,52 @@ export const TripDetails: React.FC = () => {
                   )}
                 </div>
 
+                {isOrganizer && members.some(m => m.status === 'pending') && (
+                  <div className="bg-amber-50 p-8 rounded-3xl border border-amber-100 mb-8">
+                    <h3 className="text-xl font-bold text-amber-900 mb-6 flex items-center">
+                      <AlertCircle className="w-5 h-5 mr-2" />
+                      Pending Requests
+                    </h3>
+                    <div className="space-y-4">
+                      {members.filter(m => m.status === 'pending').map((member) => (
+                        <div key={member.uid} className="bg-white p-4 rounded-2xl flex items-center justify-between shadow-sm">
+                          <div className="flex items-center space-x-4">
+                            <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center overflow-hidden">
+                              {member.photo_url ? (
+                                <img src={member.photo_url} alt={member.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <User className="w-6 h-6 text-indigo-600" />
+                              )}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-gray-900">{member.name}</h4>
+                              <p className="text-xs text-gray-500">{member.location_city || 'India'}</p>
+                            </div>
+                          </div>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleApproveMember(member.uid)}
+                              className="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 transition-all"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleRejectMember(member.uid)}
+                              className="px-4 py-2 bg-white text-red-600 text-sm font-bold rounded-xl border border-red-100 hover:bg-red-50 transition-all"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100">
-                  <h3 className="text-xl font-bold text-gray-900 mb-6">Trip Members ({members.length})</h3>
+                  <h3 className="text-xl font-bold text-gray-900 mb-6">Trip Members ({members.filter(m => m.status === 'approved' || m.isOrganizer).length})</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {members.map((member) => (
+                    {members.filter(m => m.status === 'approved' || m.isOrganizer).map((member) => (
                       <div
                         key={member.uid}
                         onClick={() => navigate(`/profile/${member.uid}`)}
@@ -702,6 +801,8 @@ export const TripDetails: React.FC = () => {
                   isMember={memberStatus === 'approved' || isOrganizer} 
                   isOrganizer={isOrganizer}
                   initialItinerary={trip.itinerary}
+                  destination={trip.destination_city}
+                  travelStyle={trip.travel_style}
                 />
               </div>
             )}
@@ -785,7 +886,7 @@ export const TripDetails: React.FC = () => {
                       onClick={() => navigate(`/trips/${trip.id}/expenses`)}
                       className="w-full py-4 bg-emerald-50 text-emerald-600 rounded-2xl font-bold hover:bg-emerald-100 transition-all flex items-center justify-center border border-emerald-100"
                     >
-                      <DollarSign className="w-5 h-5 mr-2" /> Expense Split
+                      <IndianRupee className="w-5 h-5 mr-2" /> Expense Split
                     </button>
                   </>
                 ) : memberStatus === 'pending' ? (

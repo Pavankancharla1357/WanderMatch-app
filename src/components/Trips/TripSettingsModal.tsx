@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Shield, Eye, Bell, Check, Lock, Globe, MapPin, MessageSquare, Users, DollarSign } from 'lucide-react';
+import { X, Shield, Eye, Bell, Check, Lock, Globe, MapPin, MessageSquare, Users, IndianRupee } from 'lucide-react';
 
 interface TripSettings {
   privacy: 'public' | 'private';
@@ -145,7 +145,7 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
                 {[
                   { key: 'new_member', label: 'New Member Requests', icon: Users },
                   { key: 'new_message', label: 'Group Messages', icon: MessageSquare },
-                  { key: 'expense_update', label: 'Expense Updates', icon: DollarSign },
+                  { key: 'expense_update', label: 'Expense Updates', icon: IndianRupee },
                 ].map((item) => (
                   <div 
                     key={item.key}

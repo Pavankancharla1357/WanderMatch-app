@@ -16,15 +16,25 @@ import {
   Camera, 
   MoreHorizontal,
   Check,
-  CalendarDays
+  CalendarDays,
+  MessageSquare,
+  IndianRupee,
+  Sparkles,
+  Send,
+  X,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
+import { getAiItinerarySuggestions, ItinerarySuggestion } from '../../services/geminiItineraryService';
 
 interface ItineraryPlannerProps {
   tripId: string;
   isMember: boolean;
   isOrganizer: boolean;
   initialItinerary?: string;
+  destination?: string;
+  travelStyle?: string;
 }
 
 const ACTIVITY_TYPES = [
@@ -35,12 +45,18 @@ const ACTIVITY_TYPES = [
   { id: 'other', label: 'Other', icon: MoreHorizontal, color: 'text-gray-600', bg: 'bg-gray-50' },
 ];
 
-export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMember, isOrganizer, initialItinerary }) => {
+export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMember, isOrganizer, initialItinerary, destination, travelStyle }) => {
   const { user, profile } = useAuth();
   const [items, setItems] = useState<any[]>([]);
-  const [newItem, setNewItem] = useState({ title: '', location: '', time: '', day: 1, type: 'activity' });
+  const [newItem, setNewItem] = useState({ title: '', location: '', time: '', day: 1, type: 'activity', budget: '' });
   const [isAdding, setIsAdding] = useState(false);
   const [activeDay, setActiveDay] = useState(1);
+  const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [newComment, setNewComment] = useState<Record<string, string>>({});
+  const [aiSuggestions, setAiSuggestions] = useState<ItinerarySuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, `trips/${tripId}/itinerary`), orderBy('day', 'asc'), orderBy('votes_count', 'desc'));
@@ -72,14 +88,16 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
         time: newItem.time.trim(),
         day: newItem.day,
         type: newItem.type,
+        budget: newItem.budget.trim(),
         created_by: user.uid,
         created_by_name: profile?.name || 'Member',
         votes: [],
         votes_count: 0,
         status: 'proposed',
+        comments: [],
         created_at: serverTimestamp()
       });
-      setNewItem({ title: '', location: '', time: '', day: activeDay, type: 'activity' });
+      setNewItem({ title: '', location: '', time: '', day: activeDay, type: 'activity', budget: '' });
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/itinerary`);
@@ -123,6 +141,76 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
     }
   };
 
+  const handleAddComment = async (itemId: string) => {
+    const text = newComment[itemId]?.trim();
+    if (!text || !user) return;
+
+    try {
+      const comment = {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: user.uid,
+        userName: profile?.name || user.displayName || 'Traveler',
+        userPhoto: profile?.photo_url || user.photoURL || undefined,
+        text,
+        timestamp: new Date().toISOString()
+      };
+
+      await updateDoc(doc(db, `trips/${tripId}/itinerary`, itemId), {
+        comments: arrayUnion(comment)
+      });
+      setNewComment(prev => ({ ...prev, [itemId]: '' }));
+    } catch (error) {
+      console.error('Error adding comment:', error);
+    }
+  };
+
+  const fetchAiSuggestions = async () => {
+    if (!destination) return;
+    setLoadingSuggestions(true);
+    setShowAiPanel(true);
+    setAiError(null);
+    try {
+      const suggestions = await getAiItinerarySuggestions(
+        destination,
+        travelStyle || 'General',
+        items.map(i => i.title)
+      );
+      setAiSuggestions(suggestions);
+      if (suggestions.length === 0) {
+        setAiError("No suggestions were returned. Try a different travel style or destination.");
+      }
+    } catch (err: any) {
+      console.error('Error fetching suggestions:', err);
+      setAiError(err.message || "Failed to fetch AI suggestions. Please check your connection and try again.");
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const addAiSuggestion = async (suggestion: ItinerarySuggestion) => {
+    if (!user) return;
+    try {
+      await addDoc(collection(db, `trips/${tripId}/itinerary`), {
+        trip_id: tripId,
+        title: suggestion.title,
+        description: suggestion.description,
+        type: suggestion.category.toLowerCase().includes('food') ? 'dining' : 'activity',
+        budget: suggestion.estimatedCost,
+        day: activeDay,
+        created_by: user.uid,
+        created_by_name: profile?.name || 'AI Assistant',
+        votes: [],
+        votes_count: 0,
+        status: 'proposed',
+        comments: [],
+        created_at: serverTimestamp()
+      });
+      setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
+    } catch (error) {
+      console.error('Error adding AI suggestion:', error);
+    }
+  };
+
   const getTypeIcon = (type: string) => {
     const config = ACTIVITY_TYPES.find(t => t.id === type) || ACTIVITY_TYPES[4];
     return <config.icon className={`w-5 h-5 ${config.color}`} />;
@@ -140,16 +228,108 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
           <h3 className="text-2xl font-bold text-gray-900">Itinerary Planner</h3>
           <p className="text-sm text-gray-500 mt-1">Collaborate with your group to plan the perfect trip.</p>
         </div>
-        {isMember && (
-          <button
-            onClick={() => setIsAdding(!isAdding)}
-            className="flex items-center space-x-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Propose Activity</span>
-          </button>
-        )}
+        <div className="flex space-x-2">
+          {isMember && destination && (
+            <button
+              onClick={fetchAiSuggestions}
+              className="flex items-center space-x-2 px-4 py-3 bg-indigo-50 text-indigo-600 rounded-2xl text-sm font-bold hover:bg-indigo-100 transition-all"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>AI Suggestions</span>
+            </button>
+          )}
+          {isMember && (
+            <button
+              onClick={() => setIsAdding(!isAdding)}
+              className="flex items-center space-x-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Propose Activity</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* AI Suggestions Panel */}
+      <AnimatePresence>
+        {showAiPanel && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-indigo-50 rounded-[2rem] p-6 border border-indigo-100 overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                <h4 className="font-bold text-indigo-900">AI Activity Suggestions for {destination}</h4>
+              </div>
+              <button onClick={() => setShowAiPanel(false)} className="text-indigo-400 hover:text-indigo-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {loadingSuggestions ? (
+              <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+                <p className="text-sm text-indigo-600 font-medium">Gemini is crafting unique experiences...</p>
+              </div>
+            ) : aiSuggestions.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {aiSuggestions.map((suggestion, idx) => (
+                  <motion.div
+                    key={idx}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white p-5 rounded-2xl shadow-sm border border-indigo-100 flex flex-col"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md">
+                        {suggestion.category}
+                      </span>
+                      <div className="flex items-center text-[10px] font-bold text-gray-400">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {suggestion.duration}
+                      </div>
+                    </div>
+                    <h5 className="font-bold text-gray-900 mb-2">{suggestion.title}</h5>
+                    <p className="text-xs text-gray-500 mb-4 flex-grow leading-relaxed">{suggestion.description}</p>
+                    <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-50">
+                      <div className="flex items-center text-xs font-bold text-indigo-600">
+                        <IndianRupee className="w-3 h-3 mr-1" />
+                        {suggestion.estimatedCost}
+                      </div>
+                      <button
+                        onClick={() => addAiSuggestion(suggestion)}
+                        className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-10">
+                {aiError ? (
+                  <div className="flex flex-col items-center space-y-2">
+                    <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
+                    <p className="text-red-600 font-medium">{aiError}</p>
+                    <button 
+                      onClick={fetchAiSuggestions}
+                      className="text-indigo-600 text-sm font-bold hover:underline"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-indigo-600 font-medium">No suggestions found. Try again or check back later.</p>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Day Tabs */}
       <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
@@ -225,7 +405,7 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2 space-y-2">
+                <div className="md:col-span-1 space-y-2">
                   <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Location</label>
                   <div className="relative">
                     <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -247,6 +427,19 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                       value={newItem.time}
                       onChange={(e) => setNewItem({ ...newItem, time: e.target.value })}
                       placeholder="e.g., 10:00 AM"
+                      className="w-full pl-12 pr-5 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Budget</label>
+                  <div className="relative">
+                    <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={newItem.budget}
+                      onChange={(e) => setNewItem({ ...newItem, budget: e.target.value })}
+                      placeholder="e.g., ₹500"
                       className="w-full pl-12 pr-5 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                     />
                   </div>
@@ -358,6 +551,12 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                               {item.location}
                             </div>
                           )}
+                          {item.budget && (
+                            <div className="flex items-center text-emerald-600">
+                              <IndianRupee className="w-4 h-4 mr-1 text-emerald-500" />
+                              {item.budget}
+                            </div>
+                          )}
                         </div>
                         
                         <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between">
@@ -369,6 +568,18 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                           </div>
                           
                           <div className="flex items-center space-x-2">
+                            <button 
+                              onClick={() => setExpandedItem(expandedItem === item.id ? null : item.id)}
+                              className={`p-2 rounded-xl transition-all ${expandedItem === item.id ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                              title="Comments"
+                            >
+                              <MessageSquare className="w-5 h-5" />
+                              {item.comments?.length > 0 && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-600 text-white text-[8px] flex items-center justify-center rounded-full">
+                                  {item.comments.length}
+                                </span>
+                              )}
+                            </button>
                             {isOrganizer && (
                               <button
                                 onClick={() => handleConfirm(item.id, item.status)}
@@ -393,6 +604,65 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                             )}
                           </div>
                         </div>
+
+                        {/* Comments Section */}
+                        <AnimatePresence>
+                          {expandedItem === item.id && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="mt-6 pt-6 border-t border-gray-100 overflow-hidden"
+                            >
+                              <div className="space-y-4 mb-6">
+                                {item.comments && item.comments.length > 0 ? (
+                                  item.comments.map((comment: any) => (
+                                    <div key={comment.id} className="flex space-x-3">
+                                      <div className="w-8 h-8 bg-gray-100 rounded-xl flex-shrink-0 overflow-hidden">
+                                        {comment.userPhoto ? (
+                                          <img src={comment.userPhoto} alt={comment.userName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        ) : (
+                                          <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-gray-400">
+                                            {comment.userName.charAt(0)}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="flex-1 bg-gray-50 p-3 rounded-2xl">
+                                        <div className="flex items-center justify-between mb-1">
+                                          <span className="text-xs font-bold text-gray-900">{comment.userName}</span>
+                                          <span className="text-[10px] text-gray-400">
+                                            {new Date(comment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-gray-600 leading-relaxed">{comment.text}</p>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-center text-xs text-gray-400 py-4 italic">No comments yet. Start the discussion!</p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="text"
+                                  value={newComment[item.id] || ''}
+                                  onChange={(e) => setNewComment({ ...newComment, [item.id]: e.target.value })}
+                                  placeholder="Add a comment..."
+                                  onKeyPress={(e) => e.key === 'Enter' && handleAddComment(item.id)}
+                                  className="flex-1 px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                                <button
+                                  onClick={() => handleAddComment(item.id)}
+                                  disabled={!newComment[item.id]?.trim()}
+                                  className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
+                                >
+                                  <Send className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
 
                       <div className="flex flex-col items-center sm:pl-6 sm:border-l border-gray-50 min-w-[80px]">

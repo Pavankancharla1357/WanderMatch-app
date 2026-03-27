@@ -19,6 +19,8 @@ import { CreateTrip } from './pages/Trips/CreateTrip';
 import { TripDetails } from './pages/Trips/TripDetails';
 import { JoinTrip } from './pages/Trips/JoinTrip';
 import { TripExpenses } from './pages/Trips/TripExpenses';
+import ExpertTravelPlanner from './pages/Trips/ExpertTravelPlanner';
+import TravelMatcher from './pages/Trips/TravelMatcher';
 import { ChatList } from './pages/Messages/ChatList';
 import { ChatRoom } from './pages/Messages/ChatRoom';
 import { BuddyFinder } from './pages/Feed/BuddyFinder';
@@ -118,6 +120,22 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <TripExpenses />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/expert-planner" 
+                element={
+                  <ProtectedRoute>
+                    <ExpertTravelPlanner />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/travel-matcher" 
+                element={
+                  <ProtectedRoute>
+                    <TravelMatcher />
                   </ProtectedRoute>
                 } 
               />

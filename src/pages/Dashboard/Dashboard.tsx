@@ -4,7 +4,7 @@ import { collection, query, where, getDocs, orderBy, doc, updateDoc, increment, 
 import { useAuth } from '../../components/Auth/AuthContext';
 import { createNotification } from '../../services/notificationService';
 import { TripCard } from '../../components/Trips/TripCard';
-import { LayoutDashboard, Plane, MessageSquare, Bell, ChevronRight, Star } from 'lucide-react';
+import { LayoutDashboard, Plane, MessageSquare, Bell, ChevronRight, Star, Heart, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
 
@@ -194,6 +194,26 @@ export const Dashboard: React.FC = () => {
                   <span className="bg-white px-3 py-1 rounded-full text-xs font-bold text-amber-600 shadow-sm">{requests.length}</span>
                 </div>
               </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-gray-200/50 border border-gray-100">
+              <div className="flex items-center space-x-4 mb-8">
+                <div className="w-16 h-16 bg-rose-50 rounded-2xl flex items-center justify-center">
+                  <Heart className="text-rose-600 w-8 h-8 fill-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Travel Matcher</h3>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">AI Compatibility Check</span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mb-6 font-medium">Find out if you and your travel buddy are a perfect match before you fly.</p>
+              <Link
+                to="/travel-matcher"
+                className="w-full py-3.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-[0.98]"
+              >
+                <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
+                Check Match
+              </Link>
             </div>
 
             {/* Pending Requests List */}

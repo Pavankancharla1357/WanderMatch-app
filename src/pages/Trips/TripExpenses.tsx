@@ -7,7 +7,7 @@ import { AddExpenseModal } from '../../components/Expenses/AddExpenseModal';
 import { 
   ChevronLeft, 
   Plus, 
-  DollarSign, 
+  IndianRupee, 
   PieChart, 
   TrendingUp, 
   User, 
@@ -196,7 +196,7 @@ export const TripExpenses: React.FC = () => {
                         exp.category === 'stay' ? 'bg-emerald-50 text-emerald-600' :
                         'bg-gray-50 text-gray-600'
                       }`}>
-                        <DollarSign className="w-5 h-5" />
+                        <IndianRupee className="w-5 h-5" />
                       </div>
                       <div>
                         <h4 className="font-bold text-gray-900">{exp.description}</h4>
