@@ -16,6 +16,7 @@ export const ChatRoom: React.FC = () => {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<any[]>([]);
   const [channelInfo, setChannelInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -86,58 +87,63 @@ export const ChatRoom: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!channelId) return;
+    if (!channelId || !user) return;
 
-    // Fetch channel info (could be a trip or a DM)
-    const fetchChannelInfo = async () => {
-      try {
-        // Try trip first
-        const tripDoc = await getDoc(doc(db, 'trips', channelId));
-        if (tripDoc.exists()) {
-          setChannelInfo({ ...tripDoc.data(), type: 'group' });
-          return;
-        }
+    setLoading(true);
+    let unsubscribeOtherUser: () => void = () => {};
 
-        // Handle DM case
-        const channelDoc = await getDoc(doc(db, 'channels', channelId));
-        if (channelDoc.exists()) {
-          const channelData = channelDoc.data();
-          if (channelData.type === 'direct') {
-            const otherUserId = channelData.participants.find((id: string) => id !== user?.uid);
-            if (otherUserId) {
-              const userDoc = await getDoc(doc(db, 'users', otherUserId));
+    // 1. Listen for trip info
+    const unsubscribeTrip = onSnapshot(doc(db, 'trips', channelId), (snap) => {
+      if (snap.exists()) {
+        setChannelInfo({ ...snap.data(), type: 'group' });
+        setLoading(false);
+      }
+    });
+
+    // 2. Listen for channel info (DMs)
+    const unsubscribeChannel = onSnapshot(doc(db, 'channels', channelId), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.type === 'direct') {
+          const otherUserId = data.participants.find((id: string) => id !== user.uid) || data.participants[0];
+          
+          if (otherUserId) {
+            // Clean up previous user listener if it exists
+            if (unsubscribeOtherUser) unsubscribeOtherUser();
+            
+            // Listen to the other user's profile for real-time name/photo updates
+            unsubscribeOtherUser = onSnapshot(doc(db, 'users', otherUserId), (userDoc) => {
               if (userDoc.exists()) {
+                const userData = userDoc.data();
                 setChannelInfo({
-                  name: userDoc.data().name || 'Traveler',
+                  name: userData.name || 'Traveler',
                   type: 'direct',
                   otherUserId: otherUserId,
-                  photoUrl: userDoc.data().photo_url
+                  photoUrl: userData.photo_url
                 });
-                return;
+                setLoading(false);
               }
-            }
+            });
           }
-          setChannelInfo({ name: 'Direct Message', type: 'direct' });
+        } else {
+          setChannelInfo({ name: 'Group Chat', type: 'group' });
+          setLoading(false);
         }
-      } catch (error) {
-        console.error('Error fetching channel info:', error);
       }
-    };
+    });
 
-    fetchChannelInfo();
-
+    // 3. Listen for messages
     const q = query(
       collection(db, 'messages'),
       where('channel_id', '==', channelId),
       orderBy('created_at', 'asc')
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeMessages = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMessages(msgs);
     }, (error) => {
       console.error('Error in messages snapshot:', error);
-      // Fallback: try without orderBy if it's an index issue
       if (error.message.includes('index')) {
         const fallbackQ = query(
           collection(db, 'messages'),
@@ -145,15 +151,19 @@ export const ChatRoom: React.FC = () => {
         );
         onSnapshot(fallbackQ, (snapshot) => {
           const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          // Sort manually if needed
           msgs.sort((a: any, b: any) => (a.created_at?.seconds || 0) - (b.created_at?.seconds || 0));
           setMessages(msgs);
         });
       }
     });
 
-    return () => unsubscribe();
-  }, [channelId]);
+    return () => {
+      unsubscribeTrip();
+      unsubscribeChannel();
+      unsubscribeOtherUser();
+      unsubscribeMessages();
+    };
+  }, [channelId, user]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -190,7 +200,11 @@ export const ChatRoom: React.FC = () => {
             </div>
             <div>
               <h3 className="font-bold text-gray-900 leading-none">
-                {channelInfo?.destination_city ? `${channelInfo.destination_city} Group` : (channelInfo?.name || 'Chat')}
+                {loading ? (
+                  <span className="text-gray-400 animate-pulse">Loading...</span>
+                ) : (
+                  channelInfo?.destination_city ? `${channelInfo.destination_city} Group` : (channelInfo?.name || 'Chat')
+                )}
               </h3>
               <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">Online</span>
             </div>

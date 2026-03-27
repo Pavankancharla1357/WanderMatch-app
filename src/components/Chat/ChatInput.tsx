@@ -34,110 +34,111 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelId }) => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || !user) return;
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage || !user || sending) return;
 
+    // Clear immediately for best UX
+    setMessage('');
     setSending(true);
     setShowEmojiPicker(false);
+    
     try {
       const senderName = profile?.name || user.displayName || 'Traveler';
       const senderVerified = profile?.is_verified || false;
+      
+      // 1. Primary Action: Add message to Firestore
       await addDoc(collection(db, 'messages'), {
         channel_id: channelId,
         sender_id: user.uid,
         sender_name: senderName,
         sender_verified: senderVerified,
-        content: message.trim(),
+        content: trimmedMessage,
         message_type: 'text',
         created_at: serverTimestamp(),
       });
 
-      // Update channel last message (for both trips and direct channels)
+      // 2. Secondary Actions: Metadata updates and notifications
+      // We wrap these in a separate try-catch so they don't trigger message restoration if they fail
       try {
+        // Update channel/trip last message
         const channelRef = doc(db, 'channels', channelId);
         const channelSnap = await getDoc(channelRef);
         if (channelSnap.exists()) {
           await updateDoc(channelRef, {
-            last_message: message.trim(),
+            last_message: trimmedMessage,
             last_message_time: serverTimestamp()
           });
         } else {
-          // If it's a trip group chat, we might want to update the trip doc too, 
-          // but for now let's just ensure direct channels work.
-          // Actually, let's check if it's a trip
           const tripRef = doc(db, 'trips', channelId);
           const tripSnap = await getDoc(tripRef);
           if (tripSnap.exists()) {
             await updateDoc(tripRef, {
-              last_message: message.trim(),
+              last_message: trimmedMessage,
               last_message_time: serverTimestamp()
             });
           }
         }
-      } catch (e) {
-        console.error('Error updating channel metadata:', e);
-      }
 
-      // Notify other members
-      const tripRef = doc(db, 'trips', channelId);
-      const tripSnap = await getDoc(tripRef);
-      if (tripSnap.exists()) {
-        const tripData = tripSnap.data();
-        
-        // Fetch approved members
-        const membersQ = query(
-          collection(db, 'trip_members'),
-          where('trip_id', '==', channelId),
-          where('status', '==', 'approved')
-        );
-        const membersSnap = await getDocs(membersQ);
-        
-        const notificationPromises = membersSnap.docs
-          .map(doc => doc.data().user_id)
-          .filter(uid => uid !== user.uid)
-          .map(uid => createNotification(
-            uid,
-            'new_message',
-            `New message in ${tripData.destination_city}`,
-            `${senderName} sent a message: ${message.trim().substring(0, 50)}${message.length > 50 ? '...' : ''}`,
-            `/messages/${channelId}`
-          ));
-        
-        // Also notify organizer if they are not the sender
-        if (tripData.organizer_id !== user.uid && !membersSnap.docs.some(d => d.data().user_id === tripData.organizer_id)) {
-          notificationPromises.push(createNotification(
-            tripData.organizer_id,
-            'new_message',
-            `New message in ${tripData.destination_city}`,
-            `${senderName} sent a message: ${message.trim().substring(0, 50)}${message.length > 50 ? '...' : ''}`,
-            `/messages/${channelId}`
-          ));
-        }
-
-        await Promise.all(notificationPromises);
-      } else {
-        // Check if it's a direct channel
-        const channelRef = doc(db, 'channels', channelId);
-        const channelSnap = await getDoc(channelRef);
-        if (channelSnap.exists()) {
-          const channelData = channelSnap.data();
-          if (channelData.type === 'direct') {
-            const otherUserId = channelData.participants.find((uid: string) => uid !== user.uid);
-            if (otherUserId) {
-              await createNotification(
-                otherUserId,
-                'new_message',
-                `New message from ${senderName}`,
-                `${message.trim().substring(0, 50)}${message.length > 50 ? '...' : ''}`,
-                `/messages/${channelId}`
-              );
+        // Notify other members
+        const tripRef = doc(db, 'trips', channelId);
+        const tripSnap = await getDoc(tripRef);
+        if (tripSnap.exists()) {
+          const tripData = tripSnap.data();
+          const membersQ = query(
+            collection(db, 'trip_members'),
+            where('trip_id', '==', channelId),
+            where('status', '==', 'approved')
+          );
+          const membersSnap = await getDocs(membersQ);
+          
+          const notificationPromises = membersSnap.docs
+            .map(doc => doc.data().user_id)
+            .filter(uid => uid !== user.uid)
+            .map(uid => createNotification(
+              uid,
+              'new_message',
+              `New message in ${tripData.destination_city}`,
+              `${senderName}: ${trimmedMessage.substring(0, 50)}${trimmedMessage.length > 50 ? '...' : ''}`,
+              `/messages/${channelId}`
+            ));
+          
+          if (tripData.organizer_id !== user.uid && !membersSnap.docs.some(d => d.data().user_id === tripData.organizer_id)) {
+            notificationPromises.push(createNotification(
+              tripData.organizer_id,
+              'new_message',
+              `New message in ${tripData.destination_city}`,
+              `${senderName}: ${trimmedMessage.substring(0, 50)}${trimmedMessage.length > 50 ? '...' : ''}`,
+              `/messages/${channelId}`
+            ));
+          }
+          await Promise.all(notificationPromises);
+        } else {
+          const channelRef = doc(db, 'channels', channelId);
+          const channelSnap = await getDoc(channelRef);
+          if (channelSnap.exists()) {
+            const channelData = channelSnap.data();
+            if (channelData.type === 'direct') {
+              const otherUserId = channelData.participants.find((uid: string) => uid !== user.uid);
+              if (otherUserId) {
+                await createNotification(
+                  otherUserId,
+                  'new_message',
+                  `New message from ${senderName}`,
+                  `${trimmedMessage.substring(0, 50)}${trimmedMessage.length > 50 ? '...' : ''}`,
+                  `/messages/${channelId}`
+                );
+              }
             }
           }
         }
+      } catch (secondaryError) {
+        console.error('Error in secondary chat actions:', secondaryError);
+        // We don't restore the message here because it was already sent successfully
       }
-
-      setMessage('');
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Critical error sending message:', error);
+      // Restore message only if the primary addDoc failed
+      setMessage(trimmedMessage);
     } finally {
       setSending(false);
     }
