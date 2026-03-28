@@ -2,7 +2,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { db } from "../firebase";
 import { collection, getDocs, query, where, limit } from "firebase/firestore";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const getAi = () => {
+  const apiKey = process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Gemini API Key is missing. Please ensure it is set in the environment.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 export interface BuddyMatch {
   uid: string;
@@ -17,6 +23,7 @@ export const getAiBuddyRecommendations = async (currentUserProfile: any): Promis
   if (!currentUserProfile) return [];
 
   try {
+    const ai = getAi();
     // 1. Fetch some potential buddies (excluding current user)
     // In a real app, we'd filter by location or other criteria first
     const usersRef = collection(db, "users");

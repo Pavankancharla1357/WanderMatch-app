@@ -1,3 +1,5 @@
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+
 export interface MatcherUser {
   budget: string;
   style: string;
@@ -19,22 +21,72 @@ export interface SoulmateResult extends MatchResult {
   soulmate_name: string;
 }
 
+const getAi = () => {
+  const apiKey = process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Gemini API Key is missing. Please ensure it is set in the environment.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
+
 export const findSoulmate = async (currentUser: MatcherUser, otherUsers: any[]): Promise<SoulmateResult> => {
   try {
-    const response = await fetch("/api/ai/soulmate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ currentUser, otherUsers }),
+    const ai = getAi();
+    
+    // Prepare the data for Gemini
+    const othersData = otherUsers.map((u: any) => ({
+      uid: u.uid,
+      name: u.name || "Anonymous",
+      age: u.age,
+      style: u.travel_style,
+      interests: Array.isArray(u.interests) ? u.interests.join(", ") : u.interests,
+      bio: u.bio
+    }));
+
+    const prompt = `
+      You are an expert travel matchmaker. I will give you a user's travel preferences and a list of other potential travel buddies.
+      Your task is to find the single BEST "Travel Soulmate" for the user from the list.
+
+      USER PREFERENCES:
+      - Budget: ${currentUser.budget} INR
+      - Style: ${currentUser.style}
+      - Personality: ${currentUser.personality}
+      - Interests: ${currentUser.interests}
+
+      POTENTIAL BUDDIES:
+      ${JSON.stringify(othersData, null, 2)}
+
+      Analyze compatibility based on:
+      1. Budget alignment (similar or complementary).
+      2. Travel style synergy.
+      3. Interest overlap.
+      4. Personality balance.
+
+      Return the result in JSON format:
+      {
+        "soulmate_uid": "the uid of the best match",
+        "soulmate_name": "the name of the best match",
+        "compatibility_score": number (0-100),
+        "match_summary": "a short, engaging explanation of why they are soulmates",
+        "common_interests": ["interest 1", "interest 2"],
+        "differences": ["difference 1"],
+        "suggested_trip_type": "a specific trip idea for them",
+        "confidence_level": "high" | "medium" | "low"
+      }
+    `;
+
+    const result = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+      }
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Failed to find soulmate.");
-    }
-
-    return await response.json();
+    const text = result.text;
+    if (!text) throw new Error("No response from AI");
+    return JSON.parse(text);
   } catch (error: any) {
     console.error("Error finding soulmate:", error);
     throw error;
@@ -43,20 +95,52 @@ export const findSoulmate = async (currentUser: MatcherUser, otherUsers: any[]):
 
 export const matchTravelers = async (userA: MatcherUser, userB: MatcherUser): Promise<MatchResult> => {
   try {
-    const response = await fetch("/api/ai/match", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ userA, userB }),
+    const ai = getAi();
+    const prompt = `
+      You are an intelligent travel compatibility matcher.
+      Match two users based on their travel preferences and personality.
+
+      User A:
+      - Budget: ${userA.budget}
+      - Travel style: ${userA.style}
+      - Interests: ${userA.interests}
+      - Personality: ${userA.personality}
+
+      User B:
+      - Budget: ${userB.budget}
+      - Travel style: ${userB.style}
+      - Interests: ${userB.interests}
+      - Personality: ${userB.personality}
+
+      Instructions:
+      - Calculate compatibility score (0–100)
+      - Explain why they match
+      - Highlight similarities and differences
+      - Suggest what kind of trip they can enjoy together
+
+      Output format (STRICT JSON ONLY):
+      {
+        "compatibility_score": 0,
+        "match_summary": "",
+        "common_interests": [],
+        "differences": [],
+        "suggested_trip_type": "",
+        "confidence_level": "low/medium/high"
+      }
+    `;
+
+    const result = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+      }
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Failed to match travelers.");
-    }
-
-    return await response.json();
+    const text = result.text;
+    if (!text) throw new Error("No response from AI");
+    return JSON.parse(text);
   } catch (error: any) {
     console.error("Error matching travelers:", error);
     throw error;
