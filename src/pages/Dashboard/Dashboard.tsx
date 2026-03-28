@@ -4,14 +4,16 @@ import { collection, query, where, getDocs, orderBy, doc, updateDoc, increment, 
 import { useAuth } from '../../components/Auth/AuthContext';
 import { createNotification } from '../../services/notificationService';
 import { TripCard } from '../../components/Trips/TripCard';
-import { LayoutDashboard, Plane, MessageSquare, Bell, ChevronRight, Star, Heart, Zap } from 'lucide-react';
+import { LayoutDashboard, Plane, MessageSquare, Bell, ChevronRight, Star, Heart, Zap, Plus } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 
 import { subscribeToUserRating } from '../../services/reviewService';
 
 export const Dashboard: React.FC = () => {
   const { user, profile } = useAuth();
+  const isAndroid = Capacitor.getPlatform() === 'android';
   const [myTrips, setMyTrips] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [rating, setRating] = useState<{ averageRating: number; totalReviews: number }>({ averageRating: 0, totalReviews: 0 });
@@ -150,20 +152,35 @@ export const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
+    <div className={`min-h-screen bg-gray-50 ${isAndroid ? 'pb-32' : 'pb-20'}`}>
+      <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${isAndroid ? 'py-6 pt-safe' : 'py-12'}`}>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 sm:mb-12 gap-6">
           <div>
-            <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">Welcome back, {profile?.name}</h1>
-            <p className="text-lg text-gray-500 mt-2">Here's what's happening with your travels.</p>
+            <h1 className="text-2xl sm:text-4xl font-extrabold text-gray-900 tracking-tight">
+              {isAndroid ? 'Dashboard' : `Welcome back, ${profile?.name}`}
+            </h1>
+            <p className="text-sm sm:text-lg text-gray-500 mt-1 sm:mt-2">
+              {isAndroid ? `Hi ${profile?.name}, here's your travel summary.` : "Here's what's happening with your travels."}
+            </p>
           </div>
+          {!isAndroid && (
+            <Link
+              to="/trips/create"
+              className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center"
+            >
+              <Plane className="w-5 h-5 mr-2" /> Create New Trip
+            </Link>
+          )}
+        </div>
+
+        {isAndroid && (
           <Link
             to="/trips/create"
-            className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center"
+            className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center z-50 active:scale-90 transition-transform"
           >
-            <Plane className="w-5 h-5 mr-2" /> Create New Trip
+            <Plus className="w-6 h-6" />
           </Link>
-        </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Stats & Quick Actions */}

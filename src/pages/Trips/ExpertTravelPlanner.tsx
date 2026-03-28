@@ -15,16 +15,19 @@ import {
   ArrowLeft,
   Sparkles,
   AlertCircle,
-  Heart
+  Heart,
+  Plane
 } from "lucide-react";
 import { generateFullItinerary, FullItinerary } from "../../services/geminiItineraryService";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../components/Auth/AuthContext";
+import { Capacitor } from "@capacitor/core";
 
 const ExpertTravelPlanner: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
+  const isAndroid = Capacitor.getPlatform() === 'android';
   const [loading, setLoading] = useState(false);
   const [itinerary, setItinerary] = useState<FullItinerary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,14 +134,14 @@ const ExpertTravelPlanner: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-16 selection:bg-indigo-100 font-sans text-slate-900">
+    <div className={`min-h-screen bg-slate-50 ${isAndroid ? 'pb-32' : 'pb-16'} selection:bg-indigo-100 font-sans text-slate-900`}>
       {/* Subtle Background Accent */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute top-0 right-0 w-[30%] h-[30%] bg-indigo-50/40 rounded-full blur-[100px]" />
       </div>
 
       {/* Header */}
-      <div className="bg-white/70 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40">
+      <div className={`bg-white/70 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 ${isAndroid ? 'pt-safe' : ''}`}>
         <div className="max-w-5xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
           <button 
             onClick={() => navigate(-1)}
@@ -147,9 +150,9 @@ const ExpertTravelPlanner: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-500" />
-            <h1 className="text-sm font-bold uppercase tracking-widest text-slate-800">
-              AI Travel Expert
+            <Plane className="w-4 h-4 text-indigo-500" />
+            <h1 className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-800">
+              WanderMatch AI
             </h1>
           </div>
           <button 
@@ -163,7 +166,7 @@ const ExpertTravelPlanner: React.FC = () => {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 py-8 sm:py-10 relative z-10">
+      <div className={`max-w-3xl mx-auto px-4 ${isAndroid ? 'py-4' : 'py-8'} sm:py-10 relative z-10`}>
         {!itinerary ? (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}

@@ -4,7 +4,9 @@ import { db, auth } from '../../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, linkWithPhoneNumber } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
-import { User, MapPin, Heart, Mail, Shield, Star, Edit2, Check, X, Instagram, Linkedin, Twitter, Globe, Sparkles, MessageSquare, Phone, Smartphone, Camera, Image as ImageIcon, Upload, Plane } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import { User, MapPin, Heart, Mail, Shield, Star, Edit2, Check, X, Instagram, Linkedin, Twitter, Globe, Sparkles, MessageSquare, Phone, Smartphone, Camera, Image as ImageIcon, Upload, Plane, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Cropper from 'react-easy-crop';
 import { TravelVibeQuiz } from '../../components/Profile/TravelVibeQuiz';
@@ -26,6 +28,8 @@ declare global {
 }
 
 export const Profile: React.FC = () => {
+  const navigate = useNavigate();
+  const isAndroid = Capacitor.getPlatform() === 'android';
   const { user, profile, refreshProfile } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
@@ -325,8 +329,16 @@ export const Profile: React.FC = () => {
   if (!profile) return <div className="min-h-screen flex items-center justify-center">Loading profile...</div>;
 
   return (
-    <div className="min-h-screen bg-[#F0F2F5] pb-20 font-sans selection:bg-indigo-100 selection:text-indigo-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="min-h-screen bg-[#F0F2F5] pb-32 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-12">
+        {isAndroid && (
+          <button
+            onClick={() => navigate(-1)}
+            className="mb-4 p-2 bg-white rounded-xl shadow-sm border border-gray-100 flex items-center text-gray-600 font-bold text-xs uppercase tracking-widest active:scale-95 transition-transform"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" /> Back
+          </button>
+        )}
         {/* Profile Header - Ultra Modern Design */}
         <div className="bg-white rounded-3xl shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] border border-white/60 mb-8 relative group">
           <div className={`h-48 sm:h-64 relative overflow-hidden rounded-t-3xl ${isEditing ? 'cursor-pointer group/cover' : ''}`}

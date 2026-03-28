@@ -14,17 +14,20 @@ import {
   Compass,
   IndianRupee,
   Smile,
-  MessageSquare
+  MessageSquare,
+  Plane
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { findSoulmate, SoulmateResult, MatcherUser } from "../../services/geminiMatcherService";
 import { db } from "../../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { useAuth } from "../../components/Auth/AuthContext";
+import { Capacitor } from "@capacitor/core";
 
 const TravelMatcher: React.FC = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const isAndroid = Capacitor.getPlatform() === 'android';
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SoulmateResult | null>(() => {
     const saved = sessionStorage.getItem("soulmate_result");
@@ -123,7 +126,7 @@ const TravelMatcher: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-16 selection:bg-indigo-100 font-sans text-slate-900">
+    <div className={`min-h-screen bg-slate-50 ${isAndroid ? 'pb-32' : 'pb-16'} selection:bg-indigo-100 font-sans text-slate-900`}>
       {/* Background Accent */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute top-0 right-0 w-[30%] h-[30%] bg-indigo-50/40 rounded-full blur-[100px]" />
@@ -131,7 +134,7 @@ const TravelMatcher: React.FC = () => {
       </div>
 
       {/* Header */}
-      <div className="bg-white/70 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40">
+      <div className={`bg-white/70 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 ${isAndroid ? 'pt-safe' : ''}`}>
         <div className="max-w-5xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
           <button 
             onClick={() => navigate(-1)}
@@ -140,16 +143,16 @@ const TravelMatcher: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-2">
-            <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
-            <h1 className="text-sm font-bold uppercase tracking-widest text-slate-800">
-              WanderMatch AI
+            <Plane className="w-4 h-4 text-rose-500" />
+            <h1 className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-800">
+              Soulmate Finder
             </h1>
           </div>
           <div className="w-8" />
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 py-8 sm:py-10 relative z-10">
+      <div className={`max-w-4xl mx-auto px-4 ${isAndroid ? 'py-4' : 'py-8'} sm:py-10 relative z-10`}>
         {!result ? (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}

@@ -4,9 +4,10 @@ import { useAuth } from '../Auth/AuthContext';
 import { auth, db } from '../../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Compass, MessageSquare, User, LogOut, Menu, X, AlertCircle, Users, Sparkles } from 'lucide-react';
+import { Compass, MessageSquare, User, LogOut, Menu, X, AlertCircle, Users, Sparkles, Bell } from 'lucide-react';
 import { NotificationBell } from '../Notifications/NotificationBell';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Capacitor } from '@capacitor/core';
 
 export const Navbar: React.FC = () => {
   const { user, profile } = useAuth();
@@ -14,6 +15,7 @@ export const Navbar: React.FC = () => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const isAndroid = Capacitor.getPlatform() === 'android';
 
   useEffect(() => {
     if (!user) return;
@@ -97,19 +99,31 @@ export const Navbar: React.FC = () => {
           </div>
 
           {/* Mobile menu button */}
-          <div className="md:hidden flex items-center">
-            <button
-              onClick={() => setIsOpen(!isOpen)}
-              className="text-gray-500 hover:text-gray-700 focus:outline-none"
-            >
-              {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
+          <div className="md:hidden flex items-center space-x-4">
+            {isAndroid && user ? (
+              <>
+                <NotificationBell />
+                <button 
+                  onClick={() => setShowLogoutConfirm(true)}
+                  className="text-gray-500 hover:text-red-500 transition-colors"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="text-gray-500 hover:text-gray-700 focus:outline-none"
+              >
+                {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Mobile Menu */}
-      {isOpen && (
+      {/* Mobile Menu - Only show if not Android or not logged in */}
+      {isOpen && (!isAndroid || !user) && (
         <div className="md:hidden bg-white border-t border-gray-100 px-4 pt-2 pb-6 space-y-4 shadow-lg">
           <Link to="/expert-planner" className="block text-indigo-600 font-bold py-2 flex items-center gap-2">
             <Sparkles className="w-5 h-5" />

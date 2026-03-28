@@ -8,9 +8,11 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { CustomSelect } from '../../components/UI/CustomSelect';
 import { CustomDatePicker } from '../../components/UI/CustomDatePicker';
+import { Capacitor } from '@capacitor/core';
 
 export const DiscoverTrips: React.FC = () => {
   const { user } = useAuth();
+  const isAndroid = Capacitor.getPlatform() === 'android';
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -112,21 +114,23 @@ export const DiscoverTrips: React.FC = () => {
   const tags = ['Budget', 'Adventure', 'Trekking', 'Nature', 'Luxury', 'Culture', 'Backpacking', 'Relaxation', 'Foodie'];
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
+    <div className="min-h-screen bg-gray-50 pb-32">
       {/* Header */}
-      <div className="bg-white border-b border-gray-100 pt-12 pb-8">
+      <div className={`bg-white border-b border-gray-100 ${isAndroid ? 'pt-4 pb-4 sticky top-16 z-40' : 'pt-12 pb-8'}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-6">
-            <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">Discover Adventures</h1>
-            <Link
-              to="/trips/create"
-              className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center"
-            >
-              <Plane className="w-5 h-5 mr-2" /> Create New Trip
-            </Link>
-          </div>
+          {!isAndroid && (
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-6">
+              <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">Discover Adventures</h1>
+              <Link
+                to="/trips/create"
+                className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center"
+              >
+                <Plane className="w-5 h-5 mr-2" /> Create New Trip
+              </Link>
+            </div>
+          )}
           
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex flex-col md:flex-row gap-3">
             <div className="flex-1 relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
@@ -134,37 +138,39 @@ export const DiscoverTrips: React.FC = () => {
                 placeholder="Where to next?"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
               />
             </div>
-            <button 
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center justify-center px-6 py-4 border rounded-2xl font-bold transition-all ${
-                showFilters ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              <SlidersHorizontal className="w-5 h-5 mr-2" />
-              Filters
-            </button>
-            {userLocation && (
+            <div className="flex gap-2">
               <button 
-                onClick={() => setSortByNearby(!sortByNearby)}
-                className={`flex items-center justify-center px-6 py-4 border rounded-2xl font-bold transition-all ${
-                  sortByNearby ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex-1 md:flex-none flex items-center justify-center px-4 py-3.5 border rounded-2xl font-bold transition-all text-sm ${
+                  showFilters ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                <MapPin className="w-5 h-5 mr-2" />
-                Nearby
+                <SlidersHorizontal className="w-4 h-4 mr-2" />
+                Filters
               </button>
-            )}
+              {userLocation && (
+                <button 
+                  onClick={() => setSortByNearby(!sortByNearby)}
+                  className={`flex-1 md:flex-none flex items-center justify-center px-4 py-3.5 border rounded-2xl font-bold transition-all text-sm ${
+                    sortByNearby ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <MapPin className="w-4 h-4 mr-2" />
+                  Nearby
+                </button>
+              )}
+            </div>
           </div>
           
-          <div className="flex flex-wrap gap-2 mt-6">
+          <div className="flex overflow-x-auto gap-2 mt-4 pb-2 no-scrollbar">
             {tags.map(tag => (
               <button 
                 key={tag} 
                 onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
                   selectedTag === tag 
                     ? 'bg-indigo-600 text-white shadow-md' 
                     : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
@@ -183,7 +189,7 @@ export const DiscoverTrips: React.FC = () => {
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-visible"
               >
-                <div className="mt-8 p-6 bg-gray-50 rounded-3xl border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="mt-4 p-5 bg-gray-50 rounded-3xl border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-4">
                   <CustomDatePicker
                     label="Start Date"
                     selected={filters.startDate ? new Date(filters.startDate) : null}
@@ -197,13 +203,13 @@ export const DiscoverTrips: React.FC = () => {
                     placeholder="To date"
                   />
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Max Budget (INR)</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Max Budget (INR)</label>
                     <input
                       type="number"
                       placeholder="e.g. 50000"
                       value={filters.maxBudget}
                       onChange={(e) => setFilters({ ...filters, maxBudget: e.target.value })}
-                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none hover:border-indigo-300 transition-all"
+                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none hover:border-indigo-300 transition-all text-sm"
                     />
                   </div>
                   <CustomSelect
@@ -216,7 +222,7 @@ export const DiscoverTrips: React.FC = () => {
                   <div className="md:col-span-4 flex justify-end">
                     <button 
                       onClick={() => setFilters({ startDate: '', endDate: '', maxBudget: '', travelStyle: '' })}
-                      className="text-sm font-bold text-gray-400 hover:text-indigo-600 transition-colors"
+                      className="text-xs font-bold text-gray-400 hover:text-indigo-600 transition-colors"
                     >
                       Clear All Filters
                     </button>
@@ -229,13 +235,13 @@ export const DiscoverTrips: React.FC = () => {
       </div>
 
       {/* Results */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
           </div>
         ) : filteredTrips.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredTrips.map(trip => (
               <TripCard key={trip.id} trip={trip} />
             ))}
@@ -250,6 +256,16 @@ export const DiscoverTrips: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Floating Action Button for Android */}
+      {isAndroid && (
+        <Link
+          to="/trips/create"
+          className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center z-50 active:scale-95 transition-transform"
+        >
+          <Plane className="w-6 h-6" />
+        </Link>
+      )}
     </div>
   );
 };

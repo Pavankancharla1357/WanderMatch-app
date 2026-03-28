@@ -6,6 +6,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/Auth/AuthContext';
 import { Navbar } from './components/Layout/Navbar';
+import { MobileBottomNav } from './components/Layout/MobileBottomNav';
 import { Home } from './pages/Home';
 import { Login } from './pages/Auth/Login';
 import { Register } from './pages/Auth/Register';
@@ -66,7 +67,7 @@ export default function App() {
       <AuthProvider>
         <Router>
           <ScrollToTop />
-          <div className="min-h-screen bg-gray-50">
+          <div className="min-h-screen bg-gray-50 pb-20 md:pb-0">
             <Toaster position="top-center" richColors />
             <Navbar />
             <Routes>
@@ -168,6 +169,7 @@ export default function App() {
               <Route path="/trips/:id" element={<TripDetails />} />
               <Route path="/join/:tripId/:inviteCode" element={<JoinTrip />} />
             </Routes>
+            <MobileBottomNav />
           </div>
         </Router>
       </AuthProvider>
