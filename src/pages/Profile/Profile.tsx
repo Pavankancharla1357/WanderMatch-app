@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { db, auth } from '../../firebase';
 import { doc, setDoc } from 'firebase/firestore';
-import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, linkWithPhoneNumber } from 'firebase/auth';
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, linkWithPhoneNumber, sendPasswordResetEmail } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { User, MapPin, Heart, Mail, Shield, Star, Edit2, Check, X, Instagram, Linkedin, Twitter, Globe, Sparkles, MessageSquare, Phone, Smartphone, Camera, Image as ImageIcon, Upload, Plane, ArrowLeft } from 'lucide-react';
+import { User, MapPin, Heart, Mail, Shield, Star, Edit2, Check, X, Instagram, Linkedin, Twitter, Globe, Sparkles, MessageSquare, Phone, Smartphone, Camera, Image as ImageIcon, Upload, Plane, ArrowLeft, Lock as LockIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Cropper from 'react-easy-crop';
 import { TravelVibeQuiz } from '../../components/Profile/TravelVibeQuiz';
@@ -1034,6 +1034,41 @@ export const Profile: React.FC = () => {
                       ) : (
                         <div className="w-8 h-8 bg-gray-50 rounded-full border-2 border-dashed border-gray-200" />
                       )}
+                    </div>
+                  </div>
+
+                  {/* Change Password Section */}
+                  <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-[0_15px_40px_-15px_rgba(0,0,0,0.06)] border border-gray-50 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-48 h-48 bg-violet-50/30 rounded-full -mr-24 -mt-24 blur-3xl" />
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-8 relative z-10">
+                      <div className="w-16 h-16 bg-gradient-to-br from-violet-50 to-white rounded-2xl flex items-center justify-center shadow-inner border border-violet-50/50">
+                        <LockIcon className="w-8 h-8 text-violet-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl sm:text-2xl font-black text-gray-900 mb-1">Security Settings</h3>
+                        <p className="text-gray-400 text-sm font-medium">Manage your password and account security</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 relative z-10">
+                      <p className="text-sm text-gray-600 font-medium">
+                        To change your password, we'll send a secure reset link to your registered email address.
+                      </p>
+                      <button
+                        onClick={async () => {
+                          if (!user?.email) return;
+                          try {
+                            await sendPasswordResetEmail(auth, user.email);
+                            alert(`A password reset link has been sent to ${user.email}. Please check your inbox.`);
+                          } catch (err: any) {
+                            alert(`Error: ${err.message}`);
+                          }
+                        }}
+                        className="flex items-center space-x-2 px-6 py-3 bg-violet-50 text-violet-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-violet-100 transition-all border border-violet-100"
+                      >
+                        <Mail className="w-4 h-4" />
+                        <span>Send Reset Email</span>
+                      </button>
                     </div>
                   </div>
                 </motion.div>

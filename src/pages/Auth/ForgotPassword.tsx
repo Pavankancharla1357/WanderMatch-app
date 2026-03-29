@@ -18,7 +18,11 @@ export const ForgotPassword: React.FC = () => {
     setError('');
     setMessage('');
     try {
-      await sendPasswordResetEmail(auth, email);
+      const actionCodeSettings = {
+        url: `${window.location.origin}/login`,
+        handleCodeInApp: false,
+      };
+      await sendPasswordResetEmail(auth, email, actionCodeSettings);
       setMessage('Password reset email sent! Please check your inbox.');
     } catch (err: any) {
       setError(getAuthErrorMessage(err.code) || err.message || 'Failed to send reset email');

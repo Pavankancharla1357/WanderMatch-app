@@ -232,11 +232,27 @@
         "updated_at": { "type": "string", "format": "date-time" }
       },
       "required": ["user_id", "trip_id", "latitude", "longitude"]
+    },
+    "ScannedDocument": {
+      "title": "Scanned Document",
+      "description": "Extracted data from a travel document",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "type": { "type": "string" },
+        "confidence": { "type": "number" },
+        "summary": { "type": "string" },
+        "details": { "type": "object" },
+        "image_url": { "type": "string", "format": "uri" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_id", "type", "confidence", "summary", "details", "created_at"]
     }
   },
   "firestore": {
     "/users/{userId}": { "schema": "User", "description": "User profiles" },
     "/users/{userId}/safety_contacts/{contactId}": { "schema": "SafetyContact", "description": "User emergency contacts" },
+    "/users/{userId}/documents/{documentId}": { "schema": "ScannedDocument", "description": "User's scanned travel documents" },
     "/trips/{tripId}": { "schema": "Trip", "description": "Trips" },
     "/trips/{tripId}/members/{memberId}": { "schema": "TripMember", "description": "Trip members" },
     "/trips/{tripId}/expenses/{expenseId}": { "schema": "Expense", "description": "Trip expenses" },

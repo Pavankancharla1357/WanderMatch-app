@@ -428,88 +428,88 @@ export const TripDetails: React.FC = () => {
         }
 
         const tripData = { id: tripSnap.id, ...tripSnap.data() } as any;
-        
-        // Lazy backfill invite code if missing
-        const userIsOrganizer = user?.uid === tripData.organizer_id;
-        if (!tripData.invite_code && userIsOrganizer) {
-          const newCode = generateInviteCode();
-          await updateDoc(tripRef, { 
-            invite_code: newCode,
-            invite_count: tripData.invite_count || 0 
-          });
-          tripData.invite_code = newCode;
-          if (!tripData.invite_count) tripData.invite_count = 0;
-        }
-        
         setTrip(tripData);
 
-        // Fetch all members for this trip
-        const membersQuery = query(collection(db, 'trip_members'), where('trip_id', '==', id));
-        const membersSnap = await getDocs(membersQuery);
-        
-        // Set current user's membership status
+        // Only fetch members and other data if user is logged in
         if (user) {
+          // Lazy backfill invite code if missing
+          const userIsOrganizer = user?.uid === tripData.organizer_id;
+          if (!tripData.invite_code && userIsOrganizer) {
+            const newCode = generateInviteCode();
+            await updateDoc(tripRef, { 
+              invite_code: newCode,
+              invite_count: tripData.invite_count || 0 
+            });
+            tripData.invite_code = newCode;
+            if (!tripData.invite_count) tripData.invite_count = 0;
+          }
+
+          // Fetch all members for this trip
+          const membersQuery = query(collection(db, 'trip_members'), where('trip_id', '==', id));
+          const membersSnap = await getDocs(membersQuery);
+          
+          // Set current user's membership status
           const myMemberDoc = membersSnap.docs.find(d => d.data().user_id === user.uid);
           if (myMemberDoc) {
             setMemberStatus(myMemberDoc.data().status);
           }
-        }
 
-        // Identify members to fetch profiles for
-        const memberDocs = membersSnap.docs.filter(d => d.data().user_id !== tripData.organizer_id);
-        const memberIdsToFetch = memberDocs
-          .filter(d => d.data().status === 'approved' || (userIsOrganizer && d.data().status === 'pending'))
-          .map(d => d.data().user_id);
+          // Identify members to fetch profiles for
+          const memberDocs = membersSnap.docs.filter(d => d.data().user_id !== tripData.organizer_id);
+          const memberIdsToFetch = memberDocs
+            .filter(d => d.data().status === 'approved' || (userIsOrganizer && d.data().status === 'pending'))
+            .map(d => d.data().user_id);
 
-        // Fetch profiles in parallel
-        const profilePromises = [
-          getDoc(doc(db, 'users', tripData.organizer_id)),
-          ...memberIdsToFetch.map(uid => getDoc(doc(db, 'users', uid)))
-        ];
+          // Fetch profiles in parallel
+          const profilePromises = [
+            getDoc(doc(db, 'users', tripData.organizer_id)),
+            ...memberIdsToFetch.map(uid => getDoc(doc(db, 'users', uid)))
+          ];
 
-        const profileSnaps = await Promise.all(profilePromises);
-        
-        const allMembers: any[] = [];
-        
-        // Handle Organizer (first in profileSnaps)
-        const orgSnap = profileSnaps[0];
-        let organizerData: any;
-        if (orgSnap.exists()) {
-          organizerData = { uid: orgSnap.id, ...orgSnap.data(), isOrganizer: true };
-        } else {
-          // Fallback to trip data if user profile is missing
-          organizerData = {
-            uid: tripData.organizer_id,
-            name: tripData.organizer_name || 'Organizer',
-            photo_url: tripData.organizer_photo_url,
-            is_verified: tripData.organizer_verified || false,
-            isOrganizer: true
-          };
-        }
-        setOrganizer(organizerData);
-        allMembers.push(organizerData);
-
-        // Handle other members
-        for (let i = 1; i < profileSnaps.length; i++) {
-          const pSnap = profileSnaps[i];
-          const uid = memberIdsToFetch[i-1];
-          const mDoc = memberDocs.find(d => d.data().user_id === uid);
-          const status = mDoc?.data().status;
-
-          if (pSnap.exists()) {
-            allMembers.push({ uid: pSnap.id, ...pSnap.data(), status });
+          const profileSnaps = await Promise.all(profilePromises);
+          
+          const allMembers: any[] = [];
+          
+          // Handle Organizer (first in profileSnaps)
+          const orgSnap = profileSnaps[0];
+          let organizerData: any;
+          if (orgSnap.exists()) {
+            organizerData = { uid: orgSnap.id, ...orgSnap.data(), isOrganizer: true };
           } else {
-            allMembers.push({
-              uid,
-              name: 'Traveler',
-              photo_url: null,
-              is_verified: false,
-              status
-            });
+            // Fallback to trip data if user profile is missing
+            organizerData = {
+              uid: tripData.organizer_id,
+              name: tripData.organizer_name || 'Organizer',
+              photo_url: tripData.organizer_photo_url,
+              is_verified: tripData.organizer_verified || false,
+              isOrganizer: true
+            };
           }
-        }
+          setOrganizer(organizerData);
+          allMembers.push(organizerData);
 
-        setMembers(allMembers);
+          // Handle other members
+          for (let i = 1; i < profileSnaps.length; i++) {
+            const pSnap = profileSnaps[i];
+            const uid = memberIdsToFetch[i-1];
+            const mDoc = memberDocs.find(d => d.data().user_id === uid);
+            const status = mDoc?.data().status;
+
+            if (pSnap.exists()) {
+              allMembers.push({ uid: pSnap.id, ...pSnap.data(), status });
+            } else {
+              allMembers.push({
+                uid,
+                name: 'Traveler',
+                photo_url: null,
+                is_verified: false,
+                status
+              });
+            }
+          }
+
+          setMembers(allMembers);
+        }
 
       } catch (error: any) {
         console.error('Error fetching trip details:', error);
@@ -550,6 +550,59 @@ export const TripDetails: React.FC = () => {
     );
   }
   if (!trip) return <div className="min-h-screen flex items-center justify-center">Trip not found</div>;
+  
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-white pb-24">
+        {/* Hero Image - Still show this for visual appeal */}
+        <div className="relative h-96 bg-gray-200">
+          <img
+            src={trip.cover_image || getDestinationImage(trip.destination_city)}
+            alt={trip.destination_city}
+            className="w-full h-full object-cover blur-sm"
+            referrerPolicy="no-referrer"
+          />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+          <button
+            onClick={() => navigate(-1)}
+            className="absolute top-6 left-6 p-3 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/30 transition-all"
+          >
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="max-w-md mx-auto px-4 -mt-32 relative z-10">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-10 rounded-[3rem] shadow-2xl border border-gray-100 text-center"
+          >
+            <div className="w-20 h-20 bg-indigo-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
+              <Lock className="w-10 h-10 text-indigo-600" />
+            </div>
+            <h2 className="text-3xl font-black text-gray-900 mb-4 tracking-tight">Login Required</h2>
+            <p className="text-gray-500 mb-8 leading-relaxed">
+              Join our community to view full trip details, see who's going, and connect with fellow travelers.
+            </p>
+            <div className="space-y-4">
+              <button
+                onClick={() => navigate('/login', { state: { from: `/trips/${id}` } })}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100"
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => navigate('/register')}
+                className="w-full py-4 bg-white text-indigo-600 border-2 border-indigo-50 rounded-2xl font-bold hover:bg-gray-50 transition-all"
+              >
+                Create Account
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
 
   if (trip.error === 'private') {
     return (

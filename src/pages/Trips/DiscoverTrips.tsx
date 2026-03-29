@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, query, getDocs, where, orderBy } from 'firebase/firestore';
+import { collection, query, getDocs, where, orderBy, limit } from 'firebase/firestore';
 import { TripCard } from '../../components/Trips/TripCard';
 import { Search, Filter, MapPin, Calendar as CalendarIcon, SlidersHorizontal, Compass, Plane, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -63,13 +63,35 @@ export const DiscoverTrips: React.FC = () => {
 
   useEffect(() => {
     const fetchTrips = async () => {
+      setLoading(true);
       try {
-        const q = query(
-          collection(db, 'trips'), 
-          orderBy('created_at', 'desc')
-        );
-        const querySnapshot = await getDocs(q);
+        // Strategy 1: Try to fetch all trips (works if all are public or user is admin)
+        // We use a limit to be safe
+        const qAll = query(collection(db, 'trips'), limit(100));
+        let querySnapshot;
+        
+        try {
+          querySnapshot = await getDocs(qAll);
+        } catch (permissionError) {
+          // Strategy 2: If permission denied, fetch only public trips
+          // This is required for guests when private trips exist
+          console.log('Permission denied for all trips, fetching public only...');
+          const qPublic = query(
+            collection(db, 'trips'),
+            where('settings.privacy', '==', 'public')
+          );
+          querySnapshot = await getDocs(qPublic);
+        }
+
         const tripsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Sort client-side by created_at desc
+        tripsData.sort((a: any, b: any) => {
+          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return dateB - dateA;
+        });
+        
         setTrips(tripsData);
       } catch (error) {
         console.error('Error fetching trips:', error);
@@ -79,7 +101,7 @@ export const DiscoverTrips: React.FC = () => {
     };
 
     fetchTrips();
-  }, []);
+  }, [user]);
 
   const filteredTrips = trips.filter(trip => {
     // Client-side privacy filter (backup to security rules)
@@ -91,14 +113,14 @@ export const DiscoverTrips: React.FC = () => {
     const status = trip.status || 'open';
     if (status !== 'open') return false;
 
-    const matchesSearch = trip.destination_city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      trip.destination_country.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (trip.destination_city?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (trip.destination_country?.toLowerCase() || '').includes(searchTerm.toLowerCase());
     
     const matchesTag = !selectedTag || (trip.trip_types && trip.trip_types.includes(selectedTag));
     
-    const matchesStartDate = !filters.startDate || new Date(trip.start_date) >= new Date(filters.startDate);
-    const matchesEndDate = !filters.endDate || new Date(trip.end_date) <= new Date(filters.endDate);
-    const matchesBudget = !filters.maxBudget || trip.budget_max <= parseInt(filters.maxBudget);
+    const matchesStartDate = !filters.startDate || (trip.start_date && new Date(trip.start_date) >= new Date(filters.startDate));
+    const matchesEndDate = !filters.endDate || (trip.end_date && new Date(trip.end_date) <= new Date(filters.endDate));
+    const matchesBudget = !filters.maxBudget || (trip.budget_max && trip.budget_max <= parseInt(filters.maxBudget));
     const matchesStyle = !filters.travelStyle || trip.travel_style === filters.travelStyle;
 
     return matchesSearch && matchesTag && matchesStartDate && matchesEndDate && matchesBudget && matchesStyle;
@@ -252,7 +274,31 @@ export const DiscoverTrips: React.FC = () => {
               <Compass className="text-gray-400 w-10 h-10" />
             </div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">No trips found</h3>
-            <p className="text-gray-500">Try adjusting your search or filters to find more adventures.</p>
+            <p className="text-gray-500 mb-6">Try adjusting your search or filters to find more adventures.</p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button 
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedTag(null);
+                  setFilters({ startDate: '', endDate: '', maxBudget: '', travelStyle: '' });
+                }}
+                className="px-6 py-2 bg-white border border-gray-200 rounded-xl font-bold text-gray-700 hover:bg-gray-50 transition-all"
+              >
+                Clear Filters
+              </button>
+              <Link
+                to="/trips/create"
+                className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center"
+              >
+                <Plane className="w-4 h-4 mr-2" /> Create a Trip
+              </Link>
+              <button 
+                onClick={() => window.location.reload()}
+                className="px-6 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-all"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
         )}
       </div>

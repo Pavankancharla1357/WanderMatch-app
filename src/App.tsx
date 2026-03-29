@@ -11,6 +11,7 @@ import { Home } from './pages/Home';
 import { Login } from './pages/Auth/Login';
 import { Register } from './pages/Auth/Register';
 import { ForgotPassword } from './pages/Auth/ForgotPassword';
+import { ResetPassword } from './pages/Auth/ResetPassword';
 import { ProfileSetup } from './pages/Profile/ProfileSetup';
 import { Profile } from './pages/Profile/Profile';
 import { UserProfile } from './pages/Profile/UserProfile';
@@ -20,6 +21,7 @@ import { CreateTrip } from './pages/Trips/CreateTrip';
 import { TripDetails } from './pages/Trips/TripDetails';
 import { JoinTrip } from './pages/Trips/JoinTrip';
 import { TripExpenses } from './pages/Trips/TripExpenses';
+import { DocumentVault } from './pages/Trips/DocumentVault';
 import ExpertTravelPlanner from './pages/Trips/ExpertTravelPlanner';
 import TravelMatcher from './pages/Trips/TravelMatcher';
 import { ChatList } from './pages/Messages/ChatList';
@@ -75,6 +77,7 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route 
                 path="/profile/setup" 
                 element={
@@ -137,6 +140,14 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <TravelMatcher />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/document-vault" 
+                element={
+                  <ProtectedRoute>
+                    <DocumentVault />
                   </ProtectedRoute>
                 } 
               />
