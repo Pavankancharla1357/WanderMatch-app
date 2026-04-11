@@ -1,11 +1,7 @@
-import { Type, ThinkingLevel } from "@google/genai";
+import { Type } from "@google/genai";
 import { collection, addDoc, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
-import { getGeminiInstance } from "./gemini";
-
-const getAi = () => {
-  return getGeminiInstance();
-};
+import { runWithAiRotation, getFriendlyAiError } from "./gemini";
 
 export interface ScannedDocument {
   type: string;
@@ -27,10 +23,8 @@ export interface ScannedDocument {
   };
 }
 
-export const scanTravelDocument = async (base64Data: string, mimeType: string, retries = 1): Promise<ScannedDocument> => {
+export const scanTravelDocument = async (base64Data: string, mimeType: string): Promise<ScannedDocument> => {
   try {
-    const ai = getAi();
-    
     // Ensure we only have the base64 part
     const base64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
 
@@ -39,52 +33,54 @@ Extract all relevant travel information including flight details, hotel bookings
 Provide a concise summary of the document (e.g., "Flight from NYC to London on March 25th").
 Fill in all details you can find. Mask sensitive ID numbers like passport or license numbers, showing only the last 4 digits (e.g., XXXX5678).`;
 
-    console.log(`Scanning document with model: gemini-flash-latest, mimeType: ${mimeType}, attempt: ${2 - retries}`);
+    console.log(`Scanning document with model: gemini-flash-latest, mimeType: ${mimeType}`);
     
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                data: base64,
-                mimeType: mimeType
+    const response = await runWithAiRotation(async (ai) => {
+      return await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  data: base64,
+                  mimeType: mimeType
+                }
               }
-            }
-          ]
-        }
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            type: { type: Type.STRING },
-            confidence: { type: Type.NUMBER },
-            summary: { type: Type.STRING },
-            details: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                from_location: { type: Type.STRING },
-                to_location: { type: Type.STRING },
-                departure_date: { type: Type.STRING },
-                departure_time: { type: Type.STRING },
-                arrival_date: { type: Type.STRING },
-                arrival_time: { type: Type.STRING },
-                booking_id: { type: Type.STRING },
-                provider: { type: Type.STRING },
-                address: { type: Type.STRING },
-                id_number_masked: { type: Type.STRING },
-                extra_info: { type: Type.STRING }
+            ]
+          }
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              type: { type: Type.STRING },
+              confidence: { type: Type.NUMBER },
+              summary: { type: Type.STRING },
+              details: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  from_location: { type: Type.STRING },
+                  to_location: { type: Type.STRING },
+                  departure_date: { type: Type.STRING },
+                  departure_time: { type: Type.STRING },
+                  arrival_date: { type: Type.STRING },
+                  arrival_time: { type: Type.STRING },
+                  booking_id: { type: Type.STRING },
+                  provider: { type: Type.STRING },
+                  address: { type: Type.STRING },
+                  id_number_masked: { type: Type.STRING },
+                  extra_info: { type: Type.STRING }
+                }
               }
-            }
-          },
-          required: ["type", "confidence", "summary"]
+            },
+            required: ["type", "confidence", "summary"]
+          }
         }
-      }
+      });
     });
 
     if (!response.text) {
@@ -105,15 +101,7 @@ Fill in all details you can find. Mask sensitive ID numbers like passport or lic
     }
   } catch (error: any) {
     console.error("Scan Error:", error);
-    
-    // If it's a 429 (Rate Limit) and we have retries left, wait and try again
-    if (retries > 0 && (error?.message?.includes('429') || error?.message?.includes('quota'))) {
-      console.log('Rate limit hit, retrying in 2 seconds...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return scanTravelDocument(base64Data, mimeType, retries - 1);
-    }
-    
-    throw error;
+    throw new Error(getFriendlyAiError(error));
   }
 };
 

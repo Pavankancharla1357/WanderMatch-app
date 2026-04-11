@@ -322,7 +322,7 @@ export const ProfilePage: React.FC = () => {
           targetUid,
           'connection_request',
           'New Connection Request',
-          `${currentUserProfile?.name || 'A traveler'} wants to connect with you.`,
+          `${currentUserProfile?.name || 'A traveler'} sent you a connection request`,
           `/profile/${user.uid}`
         );
         toast.success('Connection request sent!');

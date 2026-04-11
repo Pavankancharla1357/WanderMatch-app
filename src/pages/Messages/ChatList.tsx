@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../../firebase';
 import { collection, query, where, getDocs, orderBy, getDoc, doc, onSnapshot, limit, getCountFromServer, setDoc } from 'firebase/firestore';
@@ -9,21 +9,30 @@ import { toast } from 'sonner';
 
 export const ChatList: React.FC = () => {
   const { user } = useAuth();
-  const [chats, setChats] = useState<any[]>([]);
+  const [groupChats, setGroupChats] = useState<Record<string, any>>({});
+  const [directChats, setDirectChats] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [directReady, setDirectReady] = useState(false);
+  const [tripsReady, setTripsReady] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadChatIds, setUnreadChatIds] = useState<Record<string, number>>({});
   const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
   const [mutedChatIds, setMutedChatIds] = useState<Set<string>>(new Set());
   const [archivedChatIds, setArchivedChatIds] = useState<Set<string>>(new Set());
-  const [deletedChatIds, setDeletedChatIds] = useState<Set<string>>(new Set());
+  const [deletedChatTimestamps, setDeletedChatTimestamps] = useState<Record<string, string>>({});
   const [onlineUsers, setOnlineUsers] = useState<Map<string, { is_online: boolean; last_seen: string }>>(new Map());
+  const [joinedTripIds, setJoinedTripIds] = useState<string[]>([]);
+  const [organizedTripIds, setOrganizedTripIds] = useState<string[]>([]);
+
+  const allTripIds = useMemo(() => {
+    return Array.from(new Set([...joinedTripIds, ...organizedTripIds])).filter((id): id is string => !!id && typeof id === 'string');
+  }, [joinedTripIds, organizedTripIds]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !user.uid) return;
 
     // 1. Listen for unread message notifications
-    // We simplify the query to avoid potential index issues and filter in-memory
     const unreadQ = query(
       collection(db, 'notifications'),
       where('user_id', '==', user.uid),
@@ -35,7 +44,6 @@ export const ChatList: React.FC = () => {
       const counts: Record<string, number> = {};
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        // Count any unread notification that links to a chat
         const link = data.link;
         if (link && link.startsWith('/messages/')) {
           const chatId = link.split('/').pop();
@@ -49,126 +57,52 @@ export const ChatList: React.FC = () => {
       console.error('Error listening for unread notifications:', error);
     });
 
-    // 2. Listen for user chat settings (pinned, muted, archived, deleted)
+    // 2. Listen for user chat settings
     const settingsQ = collection(db, 'users', user.uid, 'chat_settings');
     const unsubscribeSettings = onSnapshot(settingsQ, (snapshot) => {
       const pinned = new Set<string>();
       const muted = new Set<string>();
       const archived = new Set<string>();
-      const deleted = new Set<string>();
+      const deletedTimestamps: Record<string, string> = {};
       
       snapshot.docs.forEach(doc => {
         const data = doc.data();
         if (data.pinned) pinned.add(doc.id);
         if (data.muted) muted.add(doc.id);
         if (data.archived) archived.add(doc.id);
-        if (data.deleted) deleted.add(doc.id);
+        if (data.deleted) {
+          deletedTimestamps[doc.id] = data.deleted_at || new Date(0).toISOString();
+        }
       });
       
       setPinnedChatIds(pinned);
       setMutedChatIds(muted);
       setArchivedChatIds(archived);
-      setDeletedChatIds(deleted);
+      setDeletedChatTimestamps(deletedTimestamps);
     });
 
-    // 3. Real-time listener for trip-based chats
+    // 3. Real-time listener for trip IDs (joined)
     const tripMembersQuery = query(
       collection(db, 'trip_members'),
       where('user_id', '==', user.uid),
       where('status', '==', 'approved')
     );
-
-    let unsubscribeTripsData: (() => void) | null = null;
-
-    const unsubscribeTripMembers = onSnapshot(tripMembersQuery, async (snapshot) => {
-      const tripIds = snapshot.docs.map(doc => doc.data().trip_id);
-      
-      // Also check for trips where user is organizer
-      const organizerQ = query(collection(db, 'trips'), where('organizer_id', '==', user.uid));
-      const organizerSnapshot = await getDocs(organizerQ);
-      const organizerTripIds = organizerSnapshot.docs.map(doc => doc.id);
-      
-      const allTripIds = Array.from(new Set([...tripIds, ...organizerTripIds])).filter(id => id && typeof id === 'string');
-
-      if (unsubscribeTripsData) unsubscribeTripsData();
-
-      if (allTripIds.length === 0) {
-        setChats(prev => prev.filter(c => c.type !== 'group'));
-        return;
-      }
-
-      const tripsQ = query(collection(db, 'trips'), where('__name__', 'in', allTripIds.slice(0, 10)));
-      unsubscribeTripsData = onSnapshot(tripsQ, async (tripsSnapshot) => {
-        const tripChatsPromises = tripsSnapshot.docs.map(async (docSnap) => {
-          try {
-            const data = docSnap.data();
-            
-            // Fetch member count and some photos for stacked avatars
-            const membersQ = query(collection(db, 'trip_members'), where('trip_id', '==', docSnap.id), limit(3));
-            const membersSnapshot = await getDocs(membersQ);
-            const memberCountSnapshot = await getCountFromServer(query(collection(db, 'trip_members'), where('trip_id', '==', docSnap.id)));
-            const memberCount = memberCountSnapshot.data().count;
-
-            const memberPhotosPromises = membersSnapshot.docs.map(async (mDoc) => {
-              try {
-                const uDoc = await getDoc(doc(db, 'users', mDoc.data().user_id));
-                return uDoc.data()?.photo_url;
-              } catch (e) {
-                return null;
-              }
-            });
-            const memberPhotos = (await Promise.all(memberPhotosPromises)).filter(Boolean);
-
-            // Fetch last message from messages collection
-            const lastMsgQ = query(
-              collection(db, 'messages'),
-              where('channel_id', '==', docSnap.id),
-              orderBy('created_at', 'desc'),
-              limit(1)
-            );
-            const lastMsgSnapshot = await getDocs(lastMsgQ);
-            const lastMsgData = lastMsgSnapshot.docs[0]?.data();
-
-            return {
-              id: docSnap.id,
-              type: 'group' as const,
-              name: `${data.destination_city} Group`,
-              lastMessage: lastMsgData ? `${lastMsgData.sender_name}: ${lastMsgData.content}` : 'Tap to open group chat',
-              icon: data.destination_city?.charAt(0) || 'T',
-              memberCount,
-              memberPhotos,
-              ...data,
-              lastMessageTime: lastMsgData?.created_at || data.last_message_time || data.updated_at || data.created_at
-            };
-          } catch (error) {
-            console.error('Error fetching trip chat:', docSnap.id, error);
-            return null;
-          }
-        });
-
-        const tripChats = (await Promise.all(tripChatsPromises)).filter(Boolean);
-        
-        setChats(prev => {
-          const others = prev.filter(c => c.type !== 'group');
-          const combined = [...others, ...tripChats].sort((a, b) => {
-            const getTimestamp = (t: any) => {
-              if (!t) return 0;
-              if (t.seconds) return t.seconds * 1000;
-              if (t instanceof Date) return t.getTime();
-              return new Date(t).getTime() || 0;
-            };
-            return getTimestamp(b.lastMessageTime) - getTimestamp(a.lastMessageTime);
-          });
-          return combined;
-        });
-        setLoading(false);
-      }, (error) => {
-        console.error('Error in trips snapshot:', error);
-        setLoading(false);
-      });
+    const unsubscribeTripMembers = onSnapshot(tripMembersQuery, (snapshot) => {
+      const ids = snapshot.docs.map(doc => doc.data().trip_id).filter(Boolean);
+      setJoinedTripIds(ids);
     });
 
-    // 3. Real-time listener for direct message channels
+    // 4. Real-time listener for trip IDs (organized)
+    const organizerQuery = query(
+      collection(db, 'trips'),
+      where('organizer_id', '==', user.uid)
+    );
+    const unsubscribeOrganizer = onSnapshot(organizerQuery, (snapshot) => {
+      const ids = snapshot.docs.map(doc => doc.id);
+      setOrganizedTripIds(ids);
+    });
+
+    // 5. Real-time listener for direct message channels
     const channelsQ = query(
       collection(db, 'channels'),
       where('participants', 'array-contains', user.uid)
@@ -183,7 +117,6 @@ export const ChatList: React.FC = () => {
           let photoUrl = null;
           let otherUserId = null;
           let otherUserInfo = null;
-
           let isConnected = true;
 
           if (data.type === 'direct') {
@@ -200,8 +133,6 @@ export const ChatList: React.FC = () => {
                   last_seen: userData.last_seen
                 };
               }
-
-              // Check connection status
               const connId = [user.uid, otherUserId].sort().join('_');
               const connDoc = await getDoc(doc(db, 'connections', connId));
               isConnected = connDoc.exists() && connDoc.data().status === 'accepted';
@@ -227,48 +158,189 @@ export const ChatList: React.FC = () => {
         }
       });
 
-      const directChats = (await Promise.all(directChatsPromises)).filter(Boolean);
+      const results = (await Promise.all(directChatsPromises)).filter(Boolean);
+      const newDirectChats: Record<string, any> = {};
+      const onlineMap = new Map(onlineUsers);
       
-      // Update online users state
-      const onlineMap = new Map();
-      directChats.forEach(chat => {
-        if (chat && chat.otherUserId && chat.otherUserInfo) {
-          onlineMap.set(chat.otherUserId, chat.otherUserInfo);
+      results.forEach(chat => {
+        if (chat) {
+          newDirectChats[chat.id] = chat;
+          if (chat.otherUserId && chat.otherUserInfo) {
+            onlineMap.set(chat.otherUserId, chat.otherUserInfo);
+          }
         }
       });
+      
+      setDirectChats(newDirectChats);
       setOnlineUsers(onlineMap);
-
-      setChats(prev => {
-        const others = prev.filter(c => c.type === 'group');
-        const combined = [...others, ...directChats].sort((a, b) => {
-          const getTimestamp = (t: any) => {
-            if (!t) return 0;
-            if (t.seconds) return t.seconds * 1000;
-            if (t instanceof Date) return t.getTime();
-            return new Date(t).getTime() || 0;
-          };
-          return getTimestamp(b.lastMessageTime) - getTimestamp(a.lastMessageTime);
-        });
-        return combined;
-      });
       setLoading(false);
+      setDirectReady(true);
     });
 
     return () => {
       unsubscribeUnread();
       unsubscribeSettings();
       unsubscribeTripMembers();
-      if (unsubscribeTripsData) unsubscribeTripsData();
+      unsubscribeOrganizer();
       unsubscribeChannels();
     };
   }, [user]);
 
-  const filteredChats = chats.filter(chat => 
-    !deletedChatIds.has(chat.id) &&
-    !archivedChatIds.has(chat.id) &&
-    ((chat.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-    (chat.lastMessage?.toLowerCase() || '').includes(searchQuery.toLowerCase()))
-  );
+  // Handle Trip Details in batches
+  useEffect(() => {
+    if (!user || !user.uid) return;
+    
+    if (allTripIds.length === 0) {
+      setGroupChats({});
+      setLoading(false);
+      setTripsReady(true);
+      return;
+    }
+
+    const batches: string[][] = [];
+    for (let i = 0; i < allTripIds.length; i += 10) {
+      batches.push(allTripIds.slice(i, i + 10));
+    }
+
+    const unsubscribes = batches.map(batch => {
+      const tripsQ = query(collection(db, 'trips'), where('__name__', 'in', batch));
+      return onSnapshot(tripsQ, async (snapshot) => {
+        const tripChatsPromises = snapshot.docs.map(async (docSnap) => {
+          try {
+            const data = docSnap.data();
+            
+            // Parallelize non-critical metadata fetching
+            const membersSnapshot = await getDocs(query(collection(db, 'trip_members'), where('trip_id', '==', docSnap.id), limit(3))).catch(() => null);
+
+            const memberCount = data.current_members || 0;
+            let memberPhotos: string[] = [];
+            
+            if (membersSnapshot) {
+              const photoPromises = membersSnapshot.docs.map(async (mDoc) => {
+                try {
+                  const uDoc = await getDoc(doc(db, 'users', mDoc.data().user_id));
+                  return uDoc.data()?.photo_url;
+                } catch (e) { return null; }
+              });
+              memberPhotos = (await Promise.all(photoPromises)).filter(Boolean);
+            }
+
+            // Fetch last message if not on trip doc
+            let lastMessage = data.last_message;
+            let lastMessageTime = data.last_message_time || data.updated_at || data.created_at;
+
+            if (!lastMessage) {
+              try {
+                const lastMsgQ = query(
+                  collection(db, 'messages'),
+                  where('channel_id', '==', docSnap.id),
+                  orderBy('created_at', 'desc'),
+                  limit(1)
+                );
+                const lastMsgSnapshot = await getDocs(lastMsgQ);
+                const lastMsgData = lastMsgSnapshot.docs[0]?.data();
+                if (lastMsgData) {
+                  lastMessage = `${lastMsgData.sender_name}: ${lastMsgData.content}`;
+                  lastMessageTime = lastMsgData.created_at;
+                }
+              } catch (e) {
+                // Ignore message fetching errors
+              }
+            }
+
+            return {
+              id: docSnap.id,
+              type: 'group' as const,
+              name: `${data.destination_city} Group`,
+              lastMessage: lastMessage || 'Tap to open group chat',
+              icon: data.destination_city?.charAt(0) || 'T',
+              memberCount,
+              memberPhotos,
+              ...data,
+              lastMessageTime
+            };
+          } catch (error) {
+            console.error('Error fetching trip chat details:', docSnap.id, error);
+            // Return basic info if full details fail
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              type: 'group' as const,
+              name: `${data.destination_city} Group`,
+              lastMessage: data.last_message || 'Tap to open group chat',
+              icon: data.destination_city?.charAt(0) || 'T',
+              memberCount: 0,
+              memberPhotos: [],
+              ...data,
+              lastMessageTime: data.last_message_time || data.updated_at || data.created_at
+            };
+          }
+        });
+
+        const results = (await Promise.all(tripChatsPromises)).filter(Boolean);
+        setGroupChats(prev => {
+          const next = { ...prev };
+          results.forEach(chat => {
+            if (chat) next[chat.id] = chat;
+          });
+          // Clean up IDs that are no longer in allTripIds
+          Object.keys(next).forEach(id => {
+            if (!allTripIds.includes(id)) {
+              delete next[id];
+            }
+          });
+          return next;
+        });
+        setLoading(false);
+        setTripsReady(true);
+      }, (error) => {
+        console.error('Error in trips batch snapshot:', error);
+      });
+    });
+
+    return () => unsubscribes.forEach(unsub => unsub());
+  }, [user, allTripIds]);
+
+  useEffect(() => {
+    if (directReady && tripsReady) {
+      setIsInitialLoad(false);
+    }
+  }, [directReady, tripsReady]);
+
+  const chats = useMemo(() => {
+    const combined = [...Object.values(groupChats), ...Object.values(directChats)];
+    return combined.sort((a, b) => {
+      const getTimestamp = (t: any) => {
+        if (!t) return 0;
+        if (t.seconds) return t.seconds * 1000;
+        if (t instanceof Date) return t.getTime();
+        return new Date(t).getTime() || 0;
+      };
+      return getTimestamp(b.lastMessageTime) - getTimestamp(a.lastMessageTime);
+    });
+  }, [groupChats, directChats]);
+
+  const filteredChats = chats.filter(chat => {
+    const deletedAt = deletedChatTimestamps[chat.id];
+    const isDeleted = !!deletedAt;
+    
+    // If deleted, only show if a new message has arrived since deletion
+    if (isDeleted) {
+      const getTimestamp = (t: any) => {
+        if (!t) return 0;
+        if (t.seconds) return t.seconds * 1000;
+        if (t instanceof Date) return t.getTime();
+        return new Date(t).getTime() || 0;
+      };
+      const lastMsgTime = getTimestamp(chat.lastMessageTime);
+      const delTime = new Date(deletedAt).getTime();
+      if (lastMsgTime <= delTime) return false;
+    }
+
+    return !archivedChatIds.has(chat.id) &&
+      ((chat.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (chat.lastMessage?.toLowerCase() || '').includes(searchQuery.toLowerCase()));
+  });
 
   const pinnedChats = filteredChats.filter(chat => pinnedChatIds.has(chat.id));
   const regularChats = filteredChats.filter(chat => !pinnedChatIds.has(chat.id));
@@ -327,7 +399,7 @@ export const ChatList: React.FC = () => {
   };
 
   const highlightText = (text: string, query: string) => {
-    if (!query) return text;
+    if (!text || !query) return text || '';
     const parts = text.split(new RegExp(`(${query})`, 'gi'));
     return parts.map((part, i) => 
       part.toLowerCase() === query.toLowerCase() 
@@ -377,9 +449,12 @@ export const ChatList: React.FC = () => {
         </div>
 
         <div className="space-y-6">
-          {loading ? (
-            <div className="text-center py-10">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
+          {isInitialLoad ? (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+              <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm font-bold text-gray-400 uppercase tracking-widest animate-pulse">
+                Loading your conversations...
+              </p>
             </div>
           ) : filteredChats.length > 0 ? (
             <>

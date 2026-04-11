@@ -6,7 +6,7 @@ import { useAuth } from '../../components/Auth/AuthContext';
 import { MessageItem } from '../../components/Chat/MessageItem';
 import { ChatInput } from '../../components/Chat/ChatInput';
 import { PollCreator } from '../../components/Chat/PollCreator';
-import { ChevronLeft, Info, Phone, Video, MoreVertical, Sparkles, Calendar, BarChart2 } from 'lucide-react';
+import { ChevronLeft, Info, Phone, Video, MoreVertical, Sparkles, Calendar, BarChart2, Clock } from 'lucide-react';
 import { addDoc, serverTimestamp } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -17,12 +17,14 @@ export const ChatRoom: React.FC = () => {
   const [messages, setMessages] = useState<any[]>([]);
   const [channelInfo, setChannelInfo] = useState<any>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
+  const [membershipStatus, setMembershipStatus] = useState<string | null>(null);
+  const [isOrganizer, setIsOrganizer] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!channelId || !user) return;
+    if (!channelId || !user || !user.uid) return;
 
     // Mark notifications for this channel as read
     const markNotificationsAsRead = async () => {
@@ -118,7 +120,7 @@ export const ChatRoom: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!channelId || !user) return;
+    if (!channelId || !user || !user.uid) return;
 
     setLoading(true);
     let unsubscribeOtherUser: () => void = () => {};
@@ -127,12 +129,24 @@ export const ChatRoom: React.FC = () => {
     // 1. Listen for trip info
     const unsubscribeTrip = onSnapshot(doc(db, 'trips', channelId), (snap) => {
       if (snap.exists()) {
-        setChannelInfo({ ...snap.data(), type: 'group' });
+        const tripData = snap.data();
+        setChannelInfo({ ...tripData, type: 'group' });
+        setIsOrganizer(tripData.organizer_id === user.uid);
         setLoading(false);
       }
     });
 
-    // 2. Listen for channel info (DMs)
+    // 2. Listen for membership status (if group)
+    const memberId = `${user.uid}_${channelId}`;
+    const unsubscribeMember = onSnapshot(doc(db, 'trip_members', memberId), (mSnap) => {
+      if (mSnap.exists()) {
+        setMembershipStatus(mSnap.data().status);
+      } else {
+        setMembershipStatus(null);
+      }
+    });
+
+    // 3. Listen for channel info (DMs)
     const unsubscribeChannel = onSnapshot(doc(db, 'channels', channelId), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -204,6 +218,7 @@ export const ChatRoom: React.FC = () => {
 
     return () => {
       unsubscribeTrip();
+      unsubscribeMember();
       unsubscribeChannel();
       unsubscribeOtherUser();
       unsubscribeMessages();
@@ -310,29 +325,46 @@ export const ChatRoom: React.FC = () => {
             </p>
           </div>
         )}
-        <div className="text-center py-8">
-          <div className="inline-block px-4 py-1.5 bg-gray-100 rounded-full text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">
-            {channelInfo?.type === 'group' ? 'Trip Created' : 'Chat Started'}
+
+        {channelInfo?.type === 'group' && !isOrganizer && membershipStatus !== 'approved' && (
+          <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100 text-center mb-6">
+            <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-3 text-amber-600">
+              <Clock className="w-6 h-6" />
+            </div>
+            <h4 className="text-sm font-black text-amber-900">Membership Pending</h4>
+            <p className="text-[10px] text-amber-600 font-bold mt-1 uppercase tracking-widest">
+              You can only view messages once your join request is approved by the organizer.
+            </p>
           </div>
-          <p className="text-xs text-gray-400 max-w-xs mx-auto">
-            {channelInfo?.type === 'group' 
-              ? `This is the beginning of your group chat for the trip to ${channelInfo?.destination_city}.`
-              : `This is the beginning of your conversation with ${channelInfo?.name || 'your travel buddy'}.`}
-          </p>
-        </div>
-        
-        {messages.map((msg) => (
-          <MessageItem key={msg.id} message={msg} isDirect={channelInfo?.type === 'direct'} />
-        ))}
+        )}
+
+        {(!channelInfo || (channelInfo.type === 'group' && (isOrganizer || membershipStatus === 'approved')) || (channelInfo.type === 'direct' && connectionStatus === 'accepted')) ? (
+          <>
+            <div className="text-center py-8">
+              <div className="inline-block px-4 py-1.5 bg-gray-100 rounded-full text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">
+                {channelInfo?.type === 'group' ? 'Trip Created' : 'Chat Started'}
+              </div>
+              <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                {channelInfo?.type === 'group' 
+                  ? `This is the beginning of your group chat for the trip to ${channelInfo?.destination_city}.`
+                  : `This is the beginning of your conversation with ${channelInfo?.name || 'your travel buddy'}.`}
+              </p>
+            </div>
+            
+            {messages.map((msg) => (
+              <MessageItem key={msg.id} message={msg} isDirect={channelInfo?.type === 'direct'} />
+            ))}
+          </>
+        ) : null}
       </div>
 
       {/* Input Area */}
-      {(!channelInfo || channelInfo.type !== 'direct' || connectionStatus === 'accepted') ? (
+      {(!channelInfo || (channelInfo.type === 'group' && (isOrganizer || membershipStatus === 'approved')) || (channelInfo.type === 'direct' && connectionStatus === 'accepted')) ? (
         <ChatInput channelId={channelId} />
       ) : (
         <div className="p-4 bg-white border-t border-gray-100 text-center">
           <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-            Messaging is restricted until connected
+            Messaging is restricted
           </p>
         </div>
       )}

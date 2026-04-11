@@ -9,7 +9,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
-import { GoogleGenAI, Type } from "@google/genai";
+import { runWithAiRotation, getFriendlyAiError } from '../../services/gemini';
+import { Type } from "@google/genai";
 
 interface Message {
   role: 'user' | 'assistant';
@@ -80,15 +81,6 @@ export const UnifiedTravelPlanner: React.FC = () => {
   }, [messages]);
 
   const generateAIResponse = async (prompt: string, type: 'chat' | 'itinerary', history: Message[] = []) => {
-    const keys = [
-      process.env.GEMINI_API_KEY,
-      process.env.GEMINI_API_KEY_1
-    ].filter(k => k && k !== '');
-
-    if (keys.length === 0) {
-      throw new Error("Gemini API Key is missing. Please add it in the Settings menu.");
-    }
-
     // Convert history to Gemini format
     const contents = history.map(msg => ({
       role: msg.role === 'user' ? 'user' : 'model',
@@ -101,10 +93,8 @@ export const UnifiedTravelPlanner: React.FC = () => {
       parts: [{ text: prompt }]
     });
 
-    const tryWithKey = async (apiKey: string) => {
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const tryModel = async (modelName: string) => {
+    try {
+      const output = await runWithAiRotation(async (ai) => {
         const config: any = {
           systemInstruction: type === "itinerary" 
             ? "You are a professional travel itinerary generator. Provide detailed, structured, and inspiring travel plans in JSON format."
@@ -177,70 +167,18 @@ export const UnifiedTravelPlanner: React.FC = () => {
         }
 
         const response = await ai.models.generateContent({
-          model: modelName,
+          model: "gemini-flash-latest",
           contents: contents,
           config
         });
         return response.text;
-      };
+      });
 
-      // Try models in order of preference
-      const models = ["gemini-3-flash-preview", "gemini-flash-latest", "gemini-3.1-flash-lite-preview"];
-      let lastModelError: any = null;
-
-      for (const model of models) {
-        try {
-          const output = await tryModel(model);
-          return { model: 'gemini' as const, output };
-        } catch (modelError: any) {
-          lastModelError = modelError;
-          console.log(`Model ${model} failed with key ${apiKey.substring(0, 5)}...:`, modelError.message);
-          // If it's a 503 or 404, try the next model
-          if (
-            modelError.message?.includes('503') || 
-            modelError.message?.includes('UNAVAILABLE') ||
-            modelError.message?.includes('404') ||
-            modelError.message?.includes('not found')
-          ) {
-            continue;
-          }
-          // For other errors (like quota), we might want to switch keys instead of models
-          throw modelError;
-        }
-      }
-      throw lastModelError;
-    };
-
-    let lastError: any = null;
-    for (const key of keys) {
-      try {
-        return await tryWithKey(key!);
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`API Key ${key?.substring(0, 5)}... failed:`, err.message);
-        // If it's a temporary error, try the next key
-        if (
-          err.message?.includes('API key not valid') || 
-          err.message?.includes('quota') || 
-          err.message?.includes('429') ||
-          err.message?.includes('503') ||
-          err.message?.includes('UNAVAILABLE') ||
-          err.message?.includes('high demand')
-        ) {
-          // Small delay before trying next key if it was a 503
-          if (err.message?.includes('503') || err.message?.includes('high demand')) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-          continue;
-        }
-      }
+      return { model: 'gemini' as const, output };
+    } catch (error: any) {
+      console.error("AI Generation Error:", error);
+      throw new Error(getFriendlyAiError(error));
     }
-
-    console.error("All API keys failed:", lastError);
-    if (lastError?.message?.includes('API key not valid')) {
-      throw new Error("The Gemini API keys provided are invalid. Please check your API keys in the Settings menu.");
-    }
-    throw new Error(lastError?.message || "Failed to generate AI response after trying all keys");
   };
 
   const handleGenerateItinerary = async (e: React.FormEvent) => {

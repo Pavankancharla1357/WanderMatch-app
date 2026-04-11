@@ -87,6 +87,7 @@ export const joinTripViaInvite = async (
       await setDoc(doc(db, 'trip_members', `${userId}_${tripId}`), {
         trip_id: tripId,
         user_id: userId,
+        organizer_id: tripData.organizer_id,
         user_name: userProfile?.name || 'Traveler',
         user_photo_url: userProfile?.photo_url || null,
         status: 'approved',

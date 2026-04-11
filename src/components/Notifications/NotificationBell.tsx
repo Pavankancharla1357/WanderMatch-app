@@ -18,19 +18,14 @@ export const NotificationBell: React.FC = () => {
     const q = query(
       collection(db, 'notifications'),
       where('user_id', '==', user.uid),
+      orderBy('created_at', 'desc'),
       limit(20)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort in memory to avoid composite index requirement
-      const sortedMsgs = msgs.sort((a: any, b: any) => {
-        const timeA = a.created_at?.seconds || 0;
-        const timeB = b.created_at?.seconds || 0;
-        return timeB - timeA;
-      });
-      setNotifications(sortedMsgs);
-      setUnreadCount(sortedMsgs.filter((n: any) => !n.is_read).length);
+      setNotifications(msgs);
+      setUnreadCount(msgs.filter((n: any) => !n.is_read).length);
     }, (error) => {
       console.error('Error in notifications snapshot:', error);
     });

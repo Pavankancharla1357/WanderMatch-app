@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebase';
 import { 
   collection, query, where, getDocs, orderBy, doc, updateDoc, 
-  increment, getDoc, limit, onSnapshot 
+  increment, getDoc, limit, onSnapshot, deleteDoc, serverTimestamp 
 } from 'firebase/firestore';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../components/Auth/AuthContext';
+import { toast } from 'sonner';
 import { createNotification } from '../../services/notificationService';
 import { TripCard } from '../../components/Trips/TripCard';
 import { 
@@ -27,6 +28,7 @@ export const Dashboard: React.FC = () => {
   const [joinedTrips, setJoinedTrips] = useState<any[]>([]);
   const [savedTrips, setSavedTrips] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [connectionRequests, setConnectionRequests] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [rating, setRating] = useState<{ averageRating: number; totalReviews: number }>({ averageRating: 0, totalReviews: 0 });
   const [loading, setLoading] = useState(true);
@@ -43,147 +45,154 @@ export const Dashboard: React.FC = () => {
       setRating(newRating);
     });
 
-    const fetchDashboardData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // 1. Fetch My Trips (organized by user)
-        console.log('Fetching my trips...');
-        let tripsData: any[] = [];
-        try {
-          const tripsQ = query(collection(db, 'trips'), where('organizer_id', '==', user.uid));
-          const tripsSnapshot = await getDocs(tripsQ);
-          tripsData = tripsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setMyTrips(tripsData);
-          console.log('My trips fetched successfully:', tripsData.length);
-        } catch (err) {
-          console.error('Error fetching my trips:', err);
-        }
+    // 1. Fetch My Trips (organized by user)
+    const tripsQ = query(collection(db, 'trips'), where('organizer_id', '==', user.uid));
+    const unsubscribeMyTrips = onSnapshot(tripsQ, (snapshot) => {
+      const tripsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMyTrips(tripsData);
+      console.log('My trips updated:', tripsData.length);
+    }, (err) => console.error('Error fetching my trips:', err));
 
-        // 2. Fetch Joined Trips
-        console.log('Fetching joined trips...');
-        try {
-          const joinedQ = query(
-            collection(db, 'trip_members'),
-            where('user_id', '==', user.uid),
-            where('status', '==', 'approved')
-          );
-          const joinedSnapshot = await getDocs(joinedQ);
-          const joinedMemberData = joinedSnapshot.docs.map(doc => doc.data());
-          console.log('Joined member data count:', joinedMemberData.length);
-          
-          if (joinedMemberData.length > 0) {
-            const tripIds = joinedMemberData.map(m => m.trip_id);
-            // Fetch trips individually to be resilient to permission errors on specific trips
-            const joinedTripsResults = await Promise.all(
-              tripIds.slice(0, 10).map(async (id) => {
-                try {
-                  const tripDoc = await getDoc(doc(db, 'trips', id));
-                  return tripDoc.exists() ? { id: tripDoc.id, ...tripDoc.data() } : null;
-                } catch (e) {
-                  console.warn(`Permission denied or error fetching joined trip ${id}:`, e);
-                  return null;
-                }
-              })
-            );
-            const validJoinedTrips = joinedTripsResults.filter(t => t !== null);
-            setJoinedTrips(validJoinedTrips);
-            console.log('Joined trips fetched successfully:', validJoinedTrips.length);
-          }
-        } catch (err) {
-          console.error('Error fetching joined trips:', err);
-        }
+    // 2. Fetch Joined Trips
+    const joinedQ = query(
+      collection(db, 'trip_members'),
+      where('user_id', '==', user.uid),
+      where('status', '==', 'approved')
+    );
+    const unsubscribeJoinedTrips = onSnapshot(joinedQ, async (snapshot) => {
+      const joinedMemberData = snapshot.docs.map(doc => doc.data());
+      if (joinedMemberData.length > 0) {
+        const tripIds = joinedMemberData.map(m => m.trip_id);
+        const joinedTripsResults = await Promise.all(
+          tripIds.slice(0, 10).map(async (id) => {
+            try {
+              const tripDoc = await getDoc(doc(db, 'trips', id));
+              return tripDoc.exists() ? { id: tripDoc.id, ...tripDoc.data() } : null;
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        setJoinedTrips(joinedTripsResults.filter(t => t !== null));
+      } else {
+        setJoinedTrips([]);
+      }
+    }, (err) => console.error('Error fetching joined trips:', err));
 
-        // 3. Fetch Saved Trips
-        console.log('Fetching saved trips...');
-        if (profile?.saved_trips?.length > 0) {
-          const savedTripsResults = await Promise.all(
-            profile.saved_trips.slice(0, 10).map(async (id: string) => {
+    // 3. Fetch Saved Trips
+    const fetchSavedTrips = async () => {
+      if (profile?.saved_trips?.length > 0) {
+        const savedTripsResults = await Promise.all(
+          profile.saved_trips.slice(0, 10).map(async (id: string) => {
+            try {
+              const tripDoc = await getDoc(doc(db, 'trips', id));
+              return tripDoc.exists() ? { id: tripDoc.id, ...tripDoc.data() } : null;
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        setSavedTrips(savedTripsResults.filter(t => t !== null));
+      } else {
+        setSavedTrips([]);
+      }
+    };
+    fetchSavedTrips();
+
+    // 4. Fetch Pending Trip Requests
+    let unsubscribeRequests: () => void = () => {};
+    const tripsQ2 = query(collection(db, 'trips'), where('organizer_id', '==', user.uid));
+    const unsubscribeTripsForRequests = onSnapshot(tripsQ2, (snapshot) => {
+      const tripIds = snapshot.docs.map(doc => doc.id);
+      if (tripIds.length > 0) {
+        const requestsQ = query(
+          collection(db, 'trip_members'), 
+          where('trip_id', 'in', tripIds.slice(0, 10)),
+          where('status', '==', 'pending')
+        );
+        unsubscribeRequests = onSnapshot(requestsQ, async (reqSnapshot) => {
+          const requestsData = await Promise.all(
+            reqSnapshot.docs.map(async (docSnap) => {
               try {
-                const tripDoc = await getDoc(doc(db, 'trips', id));
-                return tripDoc.exists() ? { id: tripDoc.id, ...tripDoc.data() } : null;
+                const data = docSnap.data();
+                const userDoc = await getDoc(doc(db, 'users', data.user_id));
+                const userData = userDoc.exists() ? userDoc.data() : null;
+                return { 
+                  id: docSnap.id, 
+                  ...data,
+                  type: 'trip',
+                  user_name: userData?.name || data.user_name || 'Traveler',
+                  user_photo: userData?.photo_url || null
+                };
               } catch (e) {
-                console.warn(`Permission denied or error fetching saved trip ${id}:`, e);
-                return null;
+                return { id: docSnap.id, ...docSnap.data(), type: 'trip', user_name: 'Traveler' };
               }
             })
           );
-          const validSavedTrips = savedTripsResults.filter(t => t !== null);
-          setSavedTrips(validSavedTrips);
-          console.log('Saved trips fetched successfully:', validSavedTrips.length);
-        }
-
-        // 4. Fetch Pending Requests for user's trips
-        console.log('Fetching pending requests...');
-        try {
-          if (tripsData.length > 0) {
-            const tripIds = tripsData.map(t => t.id).filter(id => id && typeof id === 'string');
-            if (tripIds.length > 0) {
-              const requestsQ = query(
-                collection(db, 'trip_members'), 
-                where('trip_id', 'in', tripIds.slice(0, 10)),
-                where('status', '==', 'pending')
-              );
-              const requestsSnapshot = await getDocs(requestsQ);
-              console.log('Pending requests snapshot count:', requestsSnapshot.docs.length);
-              
-              const requestsData = await Promise.all(
-                requestsSnapshot.docs.map(async (docSnap) => {
-                  try {
-                    const data = docSnap.data();
-                    if (!data.user_id) return null;
-                    const userDoc = await getDoc(doc(db, 'users', data.user_id));
-                    const userData = userDoc.exists() ? userDoc.data() : null;
-                    return { 
-                      id: docSnap.id, 
-                      ...data,
-                      user_name: userData?.name || data.user_name || 'Traveler',
-                      user_photo: userData?.photo_url || null
-                    };
-                  } catch (e) {
-                    console.warn('Error fetching user data for request:', e);
-                    return { id: docSnap.id, ...docSnap.data(), user_name: 'Traveler' };
-                  }
-                })
-              );
-              setRequests(requestsData.filter(Boolean));
-              console.log('Requests data processed successfully:', requestsData.length);
-            }
-          }
-        } catch (err) {
-          console.error('Error fetching pending requests:', err);
-        }
-
-        // 5. Fetch Recent Activities (Now handled by real-time listener)
-        // setActivities([]); 
-
-      } catch (error: any) {
-        console.error('CRITICAL: Error fetching dashboard data:', error);
-        setError(error.message || 'Failed to load dashboard data.');
-      } finally {
-        setLoading(false);
+          setRequests(requestsData.filter(Boolean));
+        });
       }
-    };
+    });
 
-    fetchDashboardData();
-    return () => unsubscribeRating();
-  }, [user, profile?.saved_trips]);
+    // 4.1 Fetch Pending Connection Requests
+    const connRequestsQ = query(
+      collection(db, 'connections'),
+      where('receiver_id', '==', user.uid),
+      where('status', '==', 'pending')
+    );
+    const unsubscribeConnRequests = onSnapshot(connRequestsQ, async (snapshot) => {
+      const connRequestsData = await Promise.all(
+        snapshot.docs.map(async (docSnap) => {
+          try {
+            const data = docSnap.data();
+            const userDoc = await getDoc(doc(db, 'users', data.sender_id));
+            const userData = userDoc.exists() ? userDoc.data() : null;
+            return {
+              id: docSnap.id,
+              ...data,
+              type: 'connection',
+              user_name: userData?.name || 'Traveler',
+              user_photo: userData?.photo_url || null
+            };
+          } catch (e) {
+            return { id: docSnap.id, ...docSnap.data(), type: 'connection', user_name: 'Traveler' };
+          }
+        })
+      );
+      setConnectionRequests(connRequestsData);
+    });
+
+    setLoading(false);
+
+    return () => {
+      unsubscribeRating();
+      unsubscribeMyTrips();
+      unsubscribeJoinedTrips();
+      unsubscribeTripsForRequests();
+      unsubscribeRequests();
+      unsubscribeConnRequests();
+    };
+  }, [user, profile]);
 
   // Real-time Activity Feed
   useEffect(() => {
-    if (!user) return;
+    if (!user || !user.uid) return;
 
     const q = query(
       collection(db, 'notifications'),
-      where('user_id', '==', user.uid),
-      orderBy('created_at', 'desc'),
-      limit(10)
+      where('user_id', '==', user.uid)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const newActivities = snapshot.docs
-        .map(doc => {
-          const data = doc.data();
+        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        .sort((a, b) => {
+          const timeA = a.created_at?.seconds || 0;
+          const timeB = b.created_at?.seconds || 0;
+          return timeB - timeA;
+        })
+        .slice(0, 20)
+        .map(data => {
           const message = data.body || data.message || '';
           
           // Filter out new_message type from activities as per user request
@@ -203,8 +212,8 @@ export const Dashboard: React.FC = () => {
           } else if (message.includes(' requested to join')) {
             userName = message.split(' requested to join')[0];
             action = `requested to join your trip`;
-          } else if (message.includes(' sent you a connection request')) {
-            userName = message.split(' sent you a connection request')[0];
+          } else if (message.includes(' sent you a connection request') || message.includes(' wants to connect with you')) {
+            userName = message.split(' sent you a connection request')[0].split(' wants to connect with you')[0];
             action = `sent a connection request`;
           } else if (message.includes(' accepted your connection request')) {
             userName = message.split(' accepted your connection request')[0];
@@ -223,7 +232,7 @@ export const Dashboard: React.FC = () => {
           const createdAt = data.created_at?.toDate ? data.created_at.toDate() : (data.created_at ? new Date(data.created_at) : new Date());
 
           return {
-            id: doc.id,
+            id: data.id,
             type: data.type,
             user: userName,
             action: action,
@@ -295,8 +304,8 @@ export const Dashboard: React.FC = () => {
       },
       { 
         id: 'requests', 
-        label: requests.length > 0 ? `${requests.length} new join requests` : 'No new requests',
-        ctaLabel: requests.length > 0 ? 'Review Requests' : 'Check Requests',
+        label: (requests.length + connectionRequests.length) > 0 ? `${requests.length + connectionRequests.length} new requests` : 'No new requests',
+        ctaLabel: (requests.length + connectionRequests.length) > 0 ? 'Review Requests' : 'Check Requests',
         icon: <Users className="w-5 h-5 text-amber-600" />,
         color: 'bg-amber-50',
         path: '#requests-section'
@@ -394,6 +403,45 @@ export const Dashboard: React.FC = () => {
       setRequests(prev => prev.filter(r => r.id !== requestId));
     } catch (error) {
       console.error(`Error ${action} request:`, error);
+    }
+  };
+
+  const handleConnectionAction = async (requestId: string, action: 'approved' | 'rejected') => {
+    if (!user) return;
+    try {
+      const requestRef = doc(db, 'connections', requestId);
+      const requestSnap = await getDoc(requestRef);
+      const requestData = requestSnap.data();
+
+      if (action === 'approved') {
+        await updateDoc(requestRef, { status: 'accepted' });
+        if (requestData) {
+          await createNotification(
+            requestData.sender_id,
+            'connection_accepted',
+            'Connection Accepted',
+            `${profile?.name || 'A traveler'} accepted your connection request!`,
+            `/profile/${user.uid}`
+          );
+        }
+        toast.success('Connection accepted!');
+      } else {
+        if (requestData) {
+          await createNotification(
+            requestData.sender_id,
+            'connection_rejected',
+            'Request Declined',
+            `${profile?.name || 'A traveler'} declined your connection request.`,
+            `/profile/${user.uid}`
+          );
+        }
+        await deleteDoc(requestRef);
+        toast.info('Connection request rejected');
+      }
+      setConnectionRequests(prev => prev.filter(r => r.id !== requestId));
+    } catch (error) {
+      console.error(`Error ${action} connection request:`, error);
+      toast.error('Failed to update connection request');
     }
   };
 
@@ -538,19 +586,20 @@ export const Dashboard: React.FC = () => {
               )}
             </div>
 
-            {/* Join Requests Widget */}
+            {/* Pending Requests Widget */}
             <div id="requests-section" className="bg-white p-6 rounded-[2.5rem] shadow-xl shadow-gray-200/50 border border-gray-100">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-gray-900">Join Requests</h3>
-                {requests.length > 0 && (
+                <h3 className="text-lg font-bold text-gray-900">Pending Requests</h3>
+                {(requests.length + connectionRequests.length) > 0 && (
                   <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase">
-                    {requests.length} New
+                    {requests.length + connectionRequests.length} New
                   </span>
                 )}
               </div>
               
-              {requests.length > 0 ? (
+              {(requests.length + connectionRequests.length) > 0 ? (
                 <div className="space-y-4">
+                  {/* Join Requests */}
                   {requests.slice(0, 3).map((req) => (
                     <div key={req.id} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 group hover:border-indigo-200 transition-colors">
                       <div className="flex items-center space-x-3 mb-3">
@@ -565,7 +614,7 @@ export const Dashboard: React.FC = () => {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-gray-900 truncate">{req.user_name}</p>
-                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tight truncate">For: {req.trip_name || 'Your Trip'}</p>
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tight truncate">Join Trip: {req.trip_name || 'Your Trip'}</p>
                         </div>
                       </div>
                       <div className="flex space-x-2">
@@ -584,9 +633,45 @@ export const Dashboard: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                  {requests.length > 3 && (
+
+                  {/* Connection Requests */}
+                  {connectionRequests.slice(0, 3).map((req) => (
+                    <div key={req.id} className="p-4 bg-indigo-50/30 rounded-2xl border border-indigo-100 group hover:border-indigo-300 transition-colors">
+                      <div className="flex items-center space-x-3 mb-3">
+                        <div className="w-10 h-10 bg-indigo-100 rounded-xl overflow-hidden">
+                          {req.user_photo ? (
+                            <img src={req.user_photo} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-indigo-600 font-bold">
+                              {req.user_name?.[0]}
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-gray-900 truncate">{req.user_name}</p>
+                          <p className="text-[9px] font-bold text-indigo-600 uppercase tracking-tight truncate">Wants to Connect</p>
+                        </div>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button 
+                          onClick={() => handleConnectionAction(req.id, 'approved')}
+                          className="flex-1 py-2 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 transition-all active:scale-95"
+                        >
+                          Accept
+                        </button>
+                        <button 
+                          onClick={() => handleConnectionAction(req.id, 'rejected')}
+                          className="flex-1 py-2 bg-white border border-gray-200 text-gray-600 text-[10px] font-bold rounded-lg hover:bg-gray-50 transition-all active:scale-95"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {(requests.length + connectionRequests.length) > 3 && (
                     <button className="w-full py-2 text-indigo-600 text-[10px] font-bold uppercase tracking-widest hover:underline">
-                      View All {requests.length} Requests
+                      View All {requests.length + connectionRequests.length} Requests
                     </button>
                   )}
                 </div>

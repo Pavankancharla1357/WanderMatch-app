@@ -28,15 +28,17 @@ import {
   Info,
   History,
   Plane,
-  Zap
+  Zap,
+  Upload
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/Auth/AuthContext';
 import { auth, db } from '../firebase';
-import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider, RecaptchaVerifier, linkWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
+import { ImageUpload } from '../components/Common/ImageUpload';
 
 type SettingsView = 'main' | 'personal' | 'security' | 'payments' | 'notifications' | 'language' | 'appearance' | 'app' | 'help';
 
@@ -47,6 +49,13 @@ export const Settings: React.FC = () => {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Phone verification states
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [verifyingPhone, setVerifyingPhone] = useState(false);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [phoneToVerify, setPhoneToVerify] = useState('');
+
   // Sub-view states
   const [personalData, setPersonalData] = useState({
     name: '',
@@ -54,6 +63,7 @@ export const Settings: React.FC = () => {
     location_city: '',
     location_country: '',
     photo_url: '',
+    phone_number: '',
   });
 
   const [securityData, setSecurityData] = useState({
@@ -92,6 +102,7 @@ export const Settings: React.FC = () => {
         location_city: profile.location_city || '',
         location_country: profile.location_country || '',
         photo_url: profile.photo_url || '',
+        phone_number: profile.phone_number || '',
       });
       
       if (profile.settings) {
@@ -136,6 +147,102 @@ export const Settings: React.FC = () => {
     document.documentElement.style.setProperty('--accent-color', colors[appearanceSettings.theme] || '#4f46e5');
   }, [appearanceSettings]);
 
+  useEffect(() => {
+    // Initialize Recaptcha for phone verification
+    const initRecaptcha = () => {
+      if (typeof window === 'undefined') return;
+      if ((window as any).recaptchaVerifierSettings) return;
+      
+      try {
+        const container = document.getElementById('recaptcha-container-settings');
+        if (!container) return;
+
+        const verifier = new RecaptchaVerifier(auth, 'recaptcha-container-settings', {
+          size: 'invisible',
+        });
+        (window as any).recaptchaVerifierSettings = verifier;
+      } catch (error) {
+        console.error('Error initializing recaptcha:', error);
+      }
+    };
+
+    if (currentView === 'security') {
+      setTimeout(initRecaptcha, 100);
+    }
+
+    return () => {
+      if ((window as any).recaptchaVerifierSettings) {
+        (window as any).recaptchaVerifierSettings.clear();
+        (window as any).recaptchaVerifierSettings = undefined;
+      }
+    };
+  }, [currentView]);
+
+  const startPhoneVerification = async () => {
+    if (!personalData.phone_number) {
+      toast.error("Please enter a phone number first.");
+      return;
+    }
+
+    if (!(window as any).recaptchaVerifierSettings) {
+      toast.error("Recaptcha not initialized. Please try again.");
+      return;
+    }
+
+    setVerifyingPhone(true);
+    try {
+      // Prepend +91 if it's a 10-digit number
+      const fullNumber = personalData.phone_number.startsWith('+') 
+        ? personalData.phone_number 
+        : `+91${personalData.phone_number}`;
+
+      const result = await linkWithPhoneNumber(user!, fullNumber, (window as any).recaptchaVerifierSettings);
+      setConfirmationResult(result);
+      setPhoneToVerify(fullNumber);
+      setShowOtpModal(true);
+    } catch (error: any) {
+      console.error('Error sending phone verification:', error);
+      if (error.code === 'auth/credential-already-in-use') {
+        toast.error("This phone number is already linked to another account.");
+      } else {
+        toast.error(`Error sending SMS: ${error.message}`);
+      }
+    } finally {
+      setVerifyingPhone(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!confirmationResult) return;
+    
+    setVerifyingPhone(true);
+    try {
+      await confirmationResult.confirm(otpCode);
+      
+      const path = `users/${user!.uid}`;
+      try {
+        await updateDoc(doc(db, 'users', user!.uid), {
+          is_phone_verified: true,
+          is_verified: true,
+          phone_number: phoneToVerify,
+          updated_at: new Date().toISOString(),
+        });
+        
+        await refreshProfile();
+        setShowOtpModal(false);
+        setOtpCode('');
+        setConfirmationResult(null);
+        toast.success("Phone verified successfully!");
+      } catch (dbError) {
+        handleFirestoreError(dbError, OperationType.UPDATE, path);
+      }
+    } catch (error: any) {
+      toast.error(`Invalid OTP: ${error.message}`);
+    } finally {
+      setVerifyingPhone(false);
+    }
+  };
+
   const handleLogout = async () => {
     await signOut(auth);
     navigate('/');
@@ -148,6 +255,9 @@ export const Settings: React.FC = () => {
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         ...personalData,
+        phone_number: personalData.phone_number.startsWith('+') 
+          ? personalData.phone_number 
+          : personalData.phone_number ? `+91${personalData.phone_number}` : '',
         updated_at: new Date().toISOString(),
       });
       await refreshProfile();
@@ -321,21 +431,12 @@ export const Settings: React.FC = () => {
     <div className="max-w-2xl mx-auto px-4 py-8">
       <form onSubmit={handleUpdateProfile} className="space-y-6">
         <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 space-y-6">
-          <div className="flex flex-col items-center gap-4 mb-8">
-            <div className="relative group">
-              <div className="w-24 h-24 bg-indigo-100 rounded-3xl flex items-center justify-center overflow-hidden border-4 border-white shadow-xl">
-                {personalData.photo_url ? (
-                  <img src={personalData.photo_url} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                ) : (
-                  <User className="w-10 h-10 text-indigo-600" />
-                )}
-              </div>
-              <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg">
-                <Camera className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Profile Photo</p>
-          </div>
+          <ImageUpload 
+            currentImageUrl={personalData.photo_url}
+            onImageUploaded={(url) => setPersonalData({ ...personalData, photo_url: url })}
+            label="Profile Photo"
+            folder="profiles"
+          />
 
           <div className="space-y-4">
             <div className="space-y-2">
@@ -384,14 +485,24 @@ export const Settings: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Photo URL</label>
-              <input
-                type="text"
-                value={personalData.photo_url}
-                onChange={(e) => setPersonalData({ ...personalData, photo_url: e.target.value })}
-                className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
-                placeholder="https://images.unsplash.com/..."
-              />
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Phone Number</label>
+              <div className="flex items-center px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus-within:ring-2 focus-within:ring-indigo-500 transition-all">
+                <span className="text-gray-400 font-bold mr-2">+91</span>
+                <input
+                  type="tel"
+                  maxLength={10}
+                  value={personalData.phone_number.replace('+91', '')}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setPersonalData({ ...personalData, phone_number: val ? `+91${val}` : '' });
+                  }}
+                  className="flex-1 bg-transparent outline-none text-sm font-medium"
+                  placeholder="9876543210"
+                />
+                {profile?.is_phone_verified && (
+                  <Check className="w-5 h-5 text-emerald-500 ml-2" />
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -492,6 +603,42 @@ export const Settings: React.FC = () => {
               <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
             </div>
           </div>
+        </div>
+
+        <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
+                <Smartphone className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Phone Verification</h3>
+                <p className="text-xs text-gray-500">
+                  {profile?.is_phone_verified 
+                    ? `Verified: ${profile.phone_number}` 
+                    : personalData.phone_number 
+                      ? `Verify ${personalData.phone_number}`
+                      : 'Add a phone number in Personal Info to verify'}
+                </p>
+              </div>
+            </div>
+            {!profile?.is_phone_verified && personalData.phone_number && (
+              <button
+                type="button"
+                onClick={startPhoneVerification}
+                disabled={verifyingPhone}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {verifyingPhone ? '...' : 'Verify Now'}
+              </button>
+            )}
+            {profile?.is_phone_verified && (
+              <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+                <Check className="w-5 h-5" />
+              </div>
+            )}
+          </div>
+          <div id="recaptcha-container-settings"></div>
         </div>
 
         <button
@@ -1057,6 +1204,57 @@ export const Settings: React.FC = () => {
           </motion.div>
         </div>
       )}
+
+      {/* OTP Verification Modal */}
+      <AnimatePresence>
+        {showOtpModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl p-8"
+            >
+              <div className="text-center mb-8">
+                <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Smartphone className="w-8 h-8 text-indigo-600" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900">Verify Phone</h3>
+                <p className="text-sm text-gray-500 mt-2">
+                  Enter the 6-digit code sent to {phoneToVerify}
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  className="w-full text-center text-3xl font-bold tracking-[0.5em] py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="000000"
+                />
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setShowOtpModal(false)}
+                    className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={verifyOtp}
+                    disabled={verifyingPhone || otpCode.length !== 6}
+                    className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 disabled:opacity-50"
+                  >
+                    {verifyingPhone ? 'Verifying...' : 'Verify'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

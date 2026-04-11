@@ -20,8 +20,9 @@ import {
 import { CustomSelect } from '../../components/UI/CustomSelect';
 import { CustomDatePicker } from '../../components/UI/CustomDatePicker';
 import { LocationAutocomplete } from '../../components/Trips/LocationAutocomplete';
+import { ImageUpload } from '../../components/Common/ImageUpload';
 import { generateInviteCode } from '../../services/inviteService';
-import { getGeminiInstance } from '../../services/gemini';
+import { runWithAiRotation, getFriendlyAiError } from '../../services/gemini';
 
 // Initialize Gemini AI
 // (Moved inside functions to ensure fresh API key)
@@ -158,16 +159,17 @@ export const CreateTrip: React.FC = () => {
     setIsGenerating(true);
     console.log("Generating AI description for:", formData.destination_city);
     try {
-      const ai = getGeminiInstance();
-      const result = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: [{
-          parts: [{
-            text: `Generate a catchy, engaging travel trip description for a trip to ${formData.destination_city}, ${formData.destination_country}. 
-            Travel style: ${formData.travel_style}. Trip types: ${formData.trip_types.join(', ')}. 
-            Keep it under 150 words. Focus on why someone should join this trip.`
+      const result = await runWithAiRotation(async (ai) => {
+        return await ai.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: [{
+            parts: [{
+              text: `Generate a catchy, engaging travel trip description for a trip to ${formData.destination_city}, ${formData.destination_country}. 
+              Travel style: ${formData.travel_style}. Trip types: ${formData.trip_types.join(', ')}. 
+              Keep it under 150 words. Focus on why someone should join this trip.`
+            }]
           }]
-        }]
+        });
       });
       
       const text = result.text;
@@ -177,8 +179,7 @@ export const CreateTrip: React.FC = () => {
       }
     } catch (error: any) {
       console.error("AI Generation Error:", error);
-      const msg = error?.message || "Please try again.";
-      toast.error(`Failed to generate description: ${msg}`);
+      toast.error(getFriendlyAiError(error));
     } finally {
       setIsGenerating(false);
     }
@@ -195,26 +196,27 @@ export const CreateTrip: React.FC = () => {
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-    if (diffDays > 10) {
-      toast.error("AI generation is limited to 10 days for now.");
+    if (diffDays > 30) {
+      toast.error("AI generation is limited to 30 days for now.");
       return;
     }
 
     setIsGenerating(true);
     console.log("Generating AI itinerary for:", formData.destination_city, "Days:", diffDays);
     try {
-      const ai = getGeminiInstance();
-      const result = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: [{
-          parts: [{
-            text: `Generate a day-wise itinerary for a ${diffDays}-day trip to ${formData.destination_city}, ${formData.destination_country}. 
-            Travel style: ${formData.travel_style}. Trip types: ${formData.trip_types.join(', ')}. 
-            Format the response as a JSON array of objects, each with 'day' (number) and 'activities' (array of strings). 
-            IMPORTANT: Return ONLY the JSON array, no other text.
-            Example: [{"day": 1, "activities": ["Arrival", "Check-in", "Dinner at local market"]}]`
+      const result = await runWithAiRotation(async (ai) => {
+        return await ai.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: [{
+            parts: [{
+              text: `Generate a day-wise itinerary for a ${diffDays}-day trip to ${formData.destination_city}, ${formData.destination_country}. 
+              Travel style: ${formData.travel_style}. Trip types: ${formData.trip_types.join(', ')}. 
+              Format the response as a JSON array of objects, each with 'day' (number) and 'activities' (array of strings). 
+              IMPORTANT: Return ONLY the JSON array, no other text.
+              Example: [{"day": 1, "activities": ["Arrival", "Check-in", "Dinner at local market"]}]`
+            }]
           }]
-        }]
+        });
       });
       
       let text = result.text;
@@ -237,8 +239,7 @@ export const CreateTrip: React.FC = () => {
       }
     } catch (error: any) {
       console.error("AI Generation Error:", error);
-      const msg = error?.message || "Please try again.";
-      toast.error(`Failed to generate itinerary: ${msg}`);
+      toast.error(getFriendlyAiError(error));
     } finally {
       setIsGenerating(false);
     }
@@ -253,7 +254,18 @@ export const CreateTrip: React.FC = () => {
       try {
         const draft = JSON.parse(savedDraft);
         setFormData(prev => ({ ...prev, ...draft }));
-        toast.success("Draft loaded! You can continue where you left off.");
+        
+        toast.info("Draft loaded!", {
+          description: "You can continue where you left off or start fresh.",
+          action: {
+            label: "Clear Draft",
+            onClick: () => {
+              localStorage.removeItem('trip_draft');
+              window.location.reload(); // Refresh to clear state
+            }
+          },
+          duration: 10000,
+        });
       } catch (e) {
         console.error("Error loading draft", e);
       }
@@ -282,18 +294,19 @@ export const CreateTrip: React.FC = () => {
     setIsGeneratingImage(true);
     console.log("Generating AI image for:", formData.destination_city);
     try {
-      const ai = getGeminiInstance();
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            {
-              text: `A stunning, high-quality travel cover photo for ${formData.destination_city}, ${formData.destination_country}. 
-              Cinematic lighting, vibrant colors, professional photography style. 
-              No text, no watermarks. Aspect ratio 16:9.`,
-            },
-          ],
-        },
+      const response = await runWithAiRotation(async (ai) => {
+        return await ai.models.generateContent({
+          model: 'gemini-2.5-flash-image',
+          contents: {
+            parts: [
+              {
+                text: `A stunning, high-quality travel cover photo for ${formData.destination_city}, ${formData.destination_country}. 
+                Cinematic lighting, vibrant colors, professional photography style. 
+                No text, no watermarks. Aspect ratio 16:9.`,
+              },
+            ],
+          },
+        });
       });
 
       for (const part of response.candidates?.[0]?.content?.parts || []) {
@@ -308,8 +321,7 @@ export const CreateTrip: React.FC = () => {
       toast.error("Failed to generate image. Please try again.");
     } catch (error: any) {
       console.error("AI Image Generation Error:", error);
-      const msg = error?.message || "Please try again.";
-      toast.error(`Failed to generate image: ${msg}`);
+      toast.error(getFriendlyAiError(error));
     } finally {
       setIsGeneratingImage(false);
     }
@@ -346,6 +358,7 @@ export const CreateTrip: React.FC = () => {
       await setDoc(doc(db, 'trip_members', `${user.uid}_${docRef.id}`), {
         trip_id: docRef.id,
         user_id: user.uid,
+        organizer_id: user.uid,
         role: 'organizer',
         status: 'approved',
         joined_at: new Date().toISOString(),
@@ -405,7 +418,19 @@ export const CreateTrip: React.FC = () => {
           {/* Progress Indicator */}
           <div className="mb-12">
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Step {currentStep} of 3</span>
+              <div className="flex items-center space-x-4">
+                <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Step {currentStep} of 3</span>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('trip_draft');
+                    window.location.reload();
+                  }}
+                  className="text-[10px] font-black text-rose-500 uppercase tracking-widest hover:text-rose-600 transition-colors"
+                >
+                  Reset Trip
+                </button>
+              </div>
               <span className="text-xs font-black text-gray-400 uppercase tracking-widest">{Math.round(calculateProgress())}% Completed</span>
             </div>
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden shadow-inner">
@@ -442,6 +467,7 @@ export const CreateTrip: React.FC = () => {
                       <div>
                         <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Destination</label>
                         <LocationAutocomplete
+                          defaultValue={formData.destination_city}
                           onSelect={(location) => {
                             setFormData({
                               ...formData,
@@ -665,16 +691,13 @@ export const CreateTrip: React.FC = () => {
                             <span>✨ AI Generate Image</span>
                           </motion.button>
                         </div>
-                        <div className="relative group/image">
-                          <ImageIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within/image:text-indigo-500 transition-colors" />
-                          <input
-                            type="url"
-                            value={formData.cover_image}
-                            onChange={(e) => setFormData({ ...formData, cover_image: e.target.value })}
-                            className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-gray-100 rounded-2xl text-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
-                            placeholder="Paste cover image URL (or use AI to generate one)"
-                          />
-                        </div>
+                        <ImageUpload 
+                          currentImageUrl={formData.cover_image}
+                          onImageUploaded={(url) => setFormData({ ...formData, cover_image: url })}
+                          label=""
+                          aspectRatio={16 / 9}
+                          folder="trips"
+                        />
                       </div>
                     </div>
                   </section>

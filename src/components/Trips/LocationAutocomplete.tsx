@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader2, Search, X, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { toast } from 'sonner';
 
 interface LocationAutocompleteProps {
   onSelect: (location: { name: string; lat: number; lng: number; city?: string; country?: string }) => void;
@@ -27,6 +28,7 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
   const [recentSearches, setRecentSearches] = useState<any[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const searchTimeoutRef = useRef<any>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('recent_locations_osm');
@@ -55,6 +57,17 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   const searchLocations = async (query: string) => {
     if (query.length < 3) {
       setSuggestions([]);
@@ -70,16 +83,29 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
 
     try {
       // Nominatim API - Free, no key required
-      // Restricting to India (countrycodes=in) and cities/towns
+      // Using a more robust query and adding a small delay to avoid rate limits
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=in&addressdetails=1&limit=5`,
-        { signal: abortControllerRef.current.signal }
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=8`,
+        { 
+          signal: abortControllerRef.current.signal,
+          headers: {
+            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': 'YatraMitra-Travel-App-V2'
+          }
+        }
       );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
-      setSuggestions(data);
+      console.log("Location suggestions received:", data);
+      setSuggestions(Array.isArray(data) ? data : []);
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         console.error("Error fetching locations:", error);
+        toast.error("Could not fetch location suggestions. Please check your connection.");
       }
     } finally {
       setLoading(false);
@@ -91,9 +117,13 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
     setValue(val);
     setIsOpen(true);
     
-    // Debounce search
-    const timeoutId = setTimeout(() => searchLocations(val), 300);
-    return () => clearTimeout(timeoutId);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = setTimeout(() => {
+      searchLocations(val);
+    }, 300);
   };
 
   const handleSelect = (location: any) => {
@@ -134,30 +164,47 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
         <input
           value={value}
           onChange={handleInput}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              searchLocations(value);
+            }
+          }}
           placeholder={placeholder}
-          className="w-full pl-11 pr-10 py-3.5 bg-white border-2 border-gray-100 rounded-2xl outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-bold text-sm text-gray-900 placeholder:text-gray-400"
+          className="w-full pl-11 pr-24 py-3.5 bg-white border-2 border-gray-100 rounded-2xl outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-bold text-sm text-gray-900 placeholder:text-gray-400"
           onFocus={() => setIsOpen(true)}
         />
-        {value && (
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+          {value && (
+            <button
+              type="button"
+              onClick={() => {
+                setValue("");
+                setSuggestions([]);
+                setIsOpen(false);
+              }}
+              className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
           <button
-            onClick={() => {
-              setValue("");
-              setSuggestions([]);
-            }}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+            type="button"
+            onClick={() => searchLocations(value)}
+            className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all"
           >
-            <X className="w-4 h-4" />
+            Search
           </button>
-        )}
+        </div>
       </div>
 
       <AnimatePresence>
-        {isOpen && (suggestions.length > 0 || (value === "" && recentSearches.length > 0)) && (
+        {isOpen && (suggestions.length > 0 || (value === "" && recentSearches.length > 0) || (value.length >= 3 && !loading && suggestions.length === 0)) && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            className="absolute z-50 w-full mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
+            className="absolute z-[100] w-full mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
           >
             <ul className="py-2 max-h-[300px] overflow-y-auto custom-scrollbar">
               {value === "" && recentSearches.length > 0 && (
@@ -165,6 +212,17 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
                   <History className="w-3 h-3 mr-2" /> Recent Searches
                 </div>
               )}
+              
+              {value.length >= 3 && !loading && suggestions.length === 0 && (
+                <div className="px-6 py-8 text-center">
+                  <div className="inline-flex p-3 bg-gray-50 rounded-2xl mb-3">
+                    <Search className="w-6 h-6 text-gray-300" />
+                  </div>
+                  <p className="text-sm font-bold text-gray-900">No locations found</p>
+                  <p className="text-xs text-gray-500 mt-1">Try a different city or check spelling</p>
+                </div>
+              )}
+
               {(value === "" ? recentSearches : suggestions).map((loc, idx) => (
                 <li
                   key={loc.place_id || idx}
@@ -176,15 +234,15 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-bold text-gray-900 truncate">
-                      {loc.address.city || 
-                       loc.address.town || 
-                       loc.address.village || 
-                       loc.address.municipality || 
-                       loc.address.city_district || 
-                       loc.address.district || 
-                       loc.address.county || 
-                       loc.address.state_district || 
-                       loc.display_name.split(',')[0]}
+                      {loc.address?.city || 
+                       loc.address?.town || 
+                       loc.address?.village || 
+                       loc.address?.municipality || 
+                       loc.address?.city_district || 
+                       loc.address?.district || 
+                       loc.address?.county || 
+                       loc.address?.state_district || 
+                       loc.display_name?.split(',')[0]}
                     </div>
                     <div className="text-xs text-gray-500 truncate">{loc.display_name}</div>
                   </div>

@@ -1,11 +1,7 @@
 import { Type } from "@google/genai";
 import { db } from "../firebase";
 import { collection, getDocs, query, where, limit } from "firebase/firestore";
-import { getGeminiInstance } from "./gemini";
-
-const getAi = () => {
-  return getGeminiInstance();
-};
+import { runWithAiRotation } from "./gemini";
 
 export interface BuddyMatch {
   uid: string;
@@ -17,12 +13,10 @@ export interface BuddyMatch {
 }
 
 export const getAiBuddyRecommendations = async (currentUserProfile: any): Promise<BuddyMatch[]> => {
-  if (!currentUserProfile) return [];
+  if (!currentUserProfile || !currentUserProfile.uid) return [];
 
   try {
-    const ai = getAi();
     // 1. Fetch some potential buddies (excluding current user)
-    // In a real app, we'd filter by location or other criteria first
     const usersRef = collection(db, "users");
     const q = query(usersRef, where("uid", "!=", currentUserProfile.uid), limit(20));
     const snapshot = await getDocs(q);
@@ -48,43 +42,45 @@ export const getAiBuddyRecommendations = async (currentUserProfile: any): Promis
       location: `${b.location_city || ""}, ${b.location_country || ""}`
     }));
 
-    // 3. Call Gemini to rank and explain matches
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: `
-        Analyze the following user profiles and find the best travel buddy matches for the current user.
-        
-        Current User:
-        ${JSON.stringify(currentUserData, null, 2)}
-        
-        Potential Buddies:
-        ${JSON.stringify(potentialBuddiesData, null, 2)}
-        
-        Return a JSON array of the top 3 matches. Each match should include:
-        - uid: string
-        - compatibilityScore: number (0-100)
-        - reasoning: string (a short, friendly explanation of why they match)
-        - commonInterests: string[] (list of shared interests or vibes)
-      `,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              uid: { type: Type.STRING },
-              compatibilityScore: { type: Type.NUMBER },
-              reasoning: { type: Type.STRING },
-              commonInterests: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              }
-            },
-            required: ["uid", "compatibilityScore", "reasoning", "commonInterests"]
+    // 3. Call Gemini with automatic rotation
+    const response = await runWithAiRotation(async (ai) => {
+      return await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: `
+          Analyze the following user profiles and find the best travel buddy matches for the current user.
+          
+          Current User:
+          ${JSON.stringify(currentUserData, null, 2)}
+          
+          Potential Buddies:
+          ${JSON.stringify(potentialBuddiesData, null, 2)}
+          
+          Return a JSON array of the top 3 matches. Each match should include:
+          - uid: string
+          - compatibilityScore: number (0-100)
+          - reasoning: string (a short, friendly explanation of why they match)
+          - commonInterests: string[] (list of shared interests or vibes)
+        `,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                uid: { type: Type.STRING },
+                compatibilityScore: { type: Type.NUMBER },
+                reasoning: { type: Type.STRING },
+                commonInterests: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                }
+              },
+              required: ["uid", "compatibilityScore", "reasoning", "commonInterests"]
+            }
           }
         }
-      }
+      });
     });
 
     const matches = JSON.parse(response.text);
@@ -99,8 +95,14 @@ export const getAiBuddyRecommendations = async (currentUserProfile: any): Promis
       };
     }).sort((a: any, b: any) => b.compatibilityScore - a.compatibilityScore);
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error getting AI buddy recommendations:", error);
+    
+    // Check for quota exceeded error after all keys tried
+    if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded')) {
+      throw new Error('QUOTA_EXCEEDED');
+    }
+    
     return [];
   }
 };

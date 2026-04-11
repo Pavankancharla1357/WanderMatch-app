@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../components/Auth/AuthContext';
-import { db, auth } from '../../firebase';
+import { db } from '../../firebase';
 import { doc, setDoc } from 'firebase/firestore';
-import { RecaptchaVerifier, linkWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, MapPin, Heart, Plane, Check, Smartphone, X } from 'lucide-react';
+import { User, MapPin, Heart, Plane, Check, Smartphone, Camera } from 'lucide-react';
+import { ImageUpload } from '../../components/Common/ImageUpload';
 
 declare global {
   interface Window {
@@ -36,11 +36,8 @@ export const ProfileSetup: React.FC = () => {
     interests: profile?.interests || [] as string[],
     travel_style: profile?.travel_style || 'mid_range',
     phone_number: profile?.phone_number || '',
+    photo_url: profile?.photo_url || user?.photoURL || '',
   });
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpCode, setOtpCode] = useState('');
-  const [verifying, setVerifying] = useState(false);
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -61,6 +58,7 @@ export const ProfileSetup: React.FC = () => {
         interests: profile.interests || prev.interests,
         travel_style: profile.travel_style || prev.travel_style,
         phone_number: displayPhone,
+        photo_url: profile.photo_url || prev.photo_url,
         social_links: {
           instagram: profile.social_links?.instagram || prev.social_links.instagram,
           linkedin: profile.social_links?.linkedin || prev.social_links.linkedin,
@@ -94,107 +92,13 @@ export const ProfileSetup: React.FC = () => {
   // Remove the auto-redirect to /discover to prevent unwanted navigation on refresh
   // The user will be redirected only when they explicitly complete the setup
 
-  useEffect(() => {
-    // Initialize Recaptcha for phone verification
-    const initRecaptcha = () => {
-      if (window.recaptchaVerifier) return;
-      
-      try {
-        const verifier = new RecaptchaVerifier(auth, 'recaptcha-container-setup', {
-          size: 'invisible',
-        });
-        window.recaptchaVerifier = verifier;
-      } catch (error) {
-        console.error('Error initializing recaptcha:', error);
-      }
-    };
-
-    initRecaptcha();
-
-    return () => {
-      if (window.recaptchaVerifier) {
-        window.recaptchaVerifier.clear();
-        window.recaptchaVerifier = undefined;
-      }
-    };
-  }, []);
-
-  const startPhoneVerification = async () => {
-    if (!formData.phone_number) {
-      alert("Please enter a phone number first.");
-      return;
-    }
-
-    if (!window.recaptchaVerifier) {
-      alert("Recaptcha not initialized. Please try again.");
-      return;
-    }
-
-    setVerifying(true);
-    try {
-      // Prepend +91 if it's a 10-digit number
-      const fullNumber = formData.phone_number.startsWith('+') 
-        ? formData.phone_number 
-        : `+91${formData.phone_number}`;
-
-      const result = await linkWithPhoneNumber(user!, fullNumber, window.recaptchaVerifier);
-      setConfirmationResult(result);
-      setShowOtpModal(true);
-    } catch (error: any) {
-      console.error('Error sending phone verification:', error);
-      if (error.code === 'auth/credential-already-in-use') {
-        alert("This phone number is already linked to another account.");
-      } else {
-        alert(`Error sending SMS: ${error.message}`);
-      }
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const verifyOtp = async () => {
-    if (!confirmationResult) return;
-    
-    setVerifying(true);
-    try {
-      await confirmationResult.confirm(otpCode);
-      
-      const path = `users/${user!.uid}`;
-      try {
-        const fullNumber = formData.phone_number.startsWith('+') 
-          ? formData.phone_number 
-          : `+91${formData.phone_number}`;
-
-        await setDoc(doc(db, 'users', user!.uid), {
-          uid: user!.uid,
-          is_phone_verified: true,
-          is_verified: true,
-          phone_number: fullNumber,
-          updated_at: new Date().toISOString(),
-        }, { merge: true });
-        
-        await refreshProfile();
-        setShowOtpModal(false);
-        setOtpCode('');
-        setConfirmationResult(null);
-        alert("Phone verified successfully!");
-      } catch (dbError) {
-        handleFirestoreError(dbError, OperationType.WRITE, path);
-      }
-    } catch (error: any) {
-      alert(`Invalid OTP: ${error.message}`);
-    } finally {
-      setVerifying(false);
-    }
-  };
-
   const handleNextStep = async (nextStep: number) => {
     if (!user) return;
 
     // Validation for Step 1
     if (step === 1) {
-      if (!formData.name || !formData.age || !formData.location_city || !formData.location_country || !formData.phone_number) {
-        alert("Please fill in all required fields (Name, Age, City, Country, Phone).");
+      if (!formData.name || !formData.age || !formData.location_city || !formData.location_country) {
+        alert("Please fill in all required fields (Name, Age, City, Country).");
         return;
       }
       if (parseInt(formData.age) < 18) {
@@ -318,6 +222,12 @@ export const ProfileSetup: React.FC = () => {
               <h2 className="text-2xl font-bold text-gray-900">Basic Info</h2>
               <p className="text-gray-500">Let's start with the basics to help others know you better.</p>
               
+              <ImageUpload 
+                currentImageUrl={formData.photo_url}
+                onImageUploaded={(url) => setFormData({ ...formData, photo_url: url })}
+                label="Profile Photo"
+              />
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                 <input
@@ -379,31 +289,20 @@ export const ProfileSetup: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                <div className="flex space-x-2">
-                  <div className="flex-1 flex items-center px-4 py-3 border border-gray-200 rounded-2xl focus-within:ring-2 focus-within:ring-indigo-500 bg-white">
-                    <span className="text-gray-400 font-bold mr-2">+91</span>
-                    <input
-                      type="tel"
-                      maxLength={10}
-                      value={formData.phone_number}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '');
-                        setFormData({ ...formData, phone_number: val });
-                      }}
-                      className="flex-1 outline-none bg-transparent"
-                      placeholder="9876543210"
-                    />
-                  </div>
-                  {!profile?.is_phone_verified && (
-                    <button
-                      onClick={startPhoneVerification}
-                      disabled={verifying}
-                      className="px-6 bg-indigo-50 text-indigo-600 rounded-2xl font-bold text-sm hover:bg-indigo-100 transition-all disabled:opacity-50"
-                    >
-                      {verifying ? '...' : 'Verify'}
-                    </button>
-                  )}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number (Optional)</label>
+                <div className="flex items-center px-4 py-3 border border-gray-200 rounded-2xl focus-within:ring-2 focus-within:ring-indigo-500 bg-white">
+                  <span className="text-gray-400 font-bold mr-2">+91</span>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={formData.phone_number}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setFormData({ ...formData, phone_number: val });
+                    }}
+                    className="flex-1 outline-none bg-transparent"
+                    placeholder="9876543210"
+                  />
                 </div>
                 {profile?.is_phone_verified && (
                   <p className="mt-1 text-xs text-emerald-600 flex items-center">
@@ -561,56 +460,6 @@ export const ProfileSetup: React.FC = () => {
           )}
         </motion.div>
       </div>
-      <AnimatePresence>
-        {showOtpModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl p-8"
-            >
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <Smartphone className="w-8 h-8 text-indigo-600" />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900">Verify Phone</h3>
-                <p className="text-sm text-gray-500 mt-2">
-                  Enter the 6-digit code sent to {formData.phone_number.startsWith('+') ? formData.phone_number : `+91${formData.phone_number}`}
-                </p>
-              </div>
-
-              <div className="space-y-6">
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value)}
-                  className="w-full text-center text-3xl font-bold tracking-[0.5em] py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                  placeholder="000000"
-                />
-
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => setShowOtpModal(false)}
-                    className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={verifyOtp}
-                    disabled={verifying || otpCode.length !== 6}
-                    className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 disabled:opacity-50"
-                  >
-                    {verifying ? 'Verifying...' : 'Verify'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-      <div id="recaptcha-container-setup"></div>
     </div>
   );
 };

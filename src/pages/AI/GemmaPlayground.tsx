@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { Sparkles, Send, Bot, User, Loader2, ArrowLeft, Trash2, Zap, Brain, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import { runWithAiRotation, getFriendlyAiError } from '../../services/gemini';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -44,18 +44,7 @@ export const GemmaPlayground: React.FC = () => {
     setError(null);
 
     try {
-      const keys = [
-        process.env.GEMINI_API_KEY,
-        process.env.GEMINI_API_KEY_1
-      ].filter(k => k && k !== '');
-
-      if (keys.length === 0) {
-        throw new Error("Gemini API Key is missing. Please add it in the Settings menu.");
-      }
-
-      const tryWithKey = async (apiKey: string) => {
-        const ai = new GoogleGenAI({ apiKey });
-        
+      const result = await runWithAiRotation(async (ai) => {
         // Map history
         const contents = messages.map(msg => ({
           role: msg.role === 'user' ? 'user' : 'model',
@@ -68,58 +57,15 @@ export const GemmaPlayground: React.FC = () => {
           parts: [{ text: currentInput }]
         });
 
-        const tryModel = async (modelName: string) => {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: contents,
-            config: {
-              systemInstruction: "You are a helpful travel assistant. You are part of the YatraMitra platform.",
-            }
-          });
-          return response.text;
-        };
-
-        const models = ["gemini-3-flash-preview", "gemini-flash-latest", "gemini-3.1-flash-lite-preview"];
-        let lastModelError: any = null;
-
-        for (const model of models) {
-          try {
-            const output = await tryModel(model);
-            return { model: 'gemini', output };
-          } catch (modelError: any) {
-            lastModelError = modelError;
-            if (
-              modelError.message?.includes('503') || 
-              modelError.message?.includes('UNAVAILABLE') ||
-              modelError.message?.includes('404') ||
-              modelError.message?.includes('not found')
-            ) {
-              continue;
-            }
-            throw modelError;
+        const response = await ai.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: contents,
+          config: {
+            systemInstruction: "You are a helpful travel assistant. You are part of the YatraMitra platform.",
           }
-        }
-        throw lastModelError;
-      };
-
-      let result: { model: string, output: string } | null = null;
-      let lastErr: any = null;
-      for (const key of keys) {
-        try {
-          result = await tryWithKey(key!);
-          lastErr = null;
-          break;
-        } catch (err: any) {
-          lastErr = err;
-          console.warn(`API Key ${key?.substring(0, 5)}... failed in Playground:`, err.message);
-          if (err.message?.includes('503') || err.message?.includes('high demand')) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-          continue;
-        }
-      }
-
-      if (lastErr) throw lastErr;
+        });
+        return { model: 'gemini', output: response.text };
+      });
 
       const assistantMessage: Message = {
         role: 'assistant',
@@ -131,7 +77,7 @@ export const GemmaPlayground: React.FC = () => {
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err: any) {
       console.error('Chat Error:', err);
-      setError(err.message || 'Failed to connect to AI. Please ensure your API key is valid.');
+      setError(getFriendlyAiError(err));
     } finally {
       setIsLoading(false);
     }

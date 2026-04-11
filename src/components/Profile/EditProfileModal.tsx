@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { db } from '../../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { X, Save, Camera, MapPin, Globe, Instagram, Linkedin, Twitter, User } from 'lucide-react';
+import { X, Save, Camera, MapPin, Globe, Instagram, Linkedin, Twitter, User, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
+import { ImageUpload } from '../Common/ImageUpload';
 
 interface EditProfileModalProps {
   profile: any;
@@ -25,6 +26,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ profile, onC
     },
     photo_url: profile.photo_url || '',
     cover_url: profile.cover_url || '',
+    phone_number: profile.phone_number || '',
   });
   const [loading, setLoading] = useState(false);
 
@@ -67,37 +69,20 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ profile, onC
 
         <form onSubmit={handleSubmit} className="p-8 space-y-8 overflow-y-auto flex-1 custom-scrollbar">
           {/* Photos Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest">Profile Photo URL</label>
-              <div className="relative group">
-                <input
-                  type="text"
-                  value={formData.photo_url}
-                  onChange={(e) => setFormData({ ...formData, photo_url: e.target.value })}
-                  className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
-                  placeholder="https://..."
-                />
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm">
-                  <Camera className="w-4 h-4 text-gray-400" />
-                </div>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest">Cover Photo URL</label>
-              <div className="relative group">
-                <input
-                  type="text"
-                  value={formData.cover_url}
-                  onChange={(e) => setFormData({ ...formData, cover_url: e.target.value })}
-                  className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
-                  placeholder="https://..."
-                />
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm">
-                  <Globe className="w-4 h-4 text-gray-400" />
-                </div>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <ImageUpload 
+              currentImageUrl={formData.photo_url}
+              onImageUploaded={(url) => setFormData({ ...formData, photo_url: url })}
+              label="Profile Photo"
+              folder="profiles"
+            />
+            <ImageUpload 
+              currentImageUrl={formData.cover_url}
+              onImageUploaded={(url) => setFormData({ ...formData, cover_url: url })}
+              label="Cover Photo"
+              aspectRatio={16 / 9}
+              folder="covers"
+            />
           </div>
 
           {/* Basic Info */}
@@ -113,6 +98,26 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ profile, onC
                   className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
                 />
               </div>
+              <div className="space-y-3">
+                <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest">Phone Number</label>
+                <div className="flex items-center px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus-within:ring-2 focus-within:ring-indigo-500 transition-all">
+                  <span className="text-gray-400 font-bold mr-2">+91</span>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={formData.phone_number.replace('+91', '')}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setFormData({ ...formData, phone_number: val ? `+91${val}` : '' });
+                    }}
+                    className="flex-1 bg-transparent outline-none text-sm font-medium"
+                    placeholder="9876543210"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-3">
                   <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest">City</label>

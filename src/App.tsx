@@ -41,22 +41,32 @@ const NotificationListener = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !user.uid) return;
 
-    // Listen for new unread notifications to show toasts
+    // Listen for notifications for the user
+    // We remove is_read and orderBy to avoid composite index requirement and potential SDK assertion errors
     const q = query(
       collection(db, 'notifications'),
-      where('user_id', '==', user.uid),
-      where('is_read', '==', false),
-      orderBy('created_at', 'desc'),
-      limit(1)
+      where('user_id', '==', user.uid)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Filter and sort in memory
+      const unreadDocs = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter((n: any) => !n.is_read)
+        .sort((a: any, b: any) => {
+          const timeA = a.created_at?.seconds || 0;
+          const timeB = b.created_at?.seconds || 0;
+          return timeB - timeA;
+        });
+
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const data = change.doc.data();
-          // Only show toast if it's a very recent notification (within last 10 seconds)
+          if (data.is_read) return; // Only show toasts for unread ones
+
+          // Only show toast if it's very recent (within last 10 seconds)
           const createdAt = data.created_at?.toDate ? data.created_at.toDate() : (data.created_at ? new Date(data.created_at) : new Date());
           if (Date.now() - createdAt.getTime() < 10000) {
             toast(data.title, {

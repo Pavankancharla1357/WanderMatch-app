@@ -3,10 +3,11 @@ import { db } from '../../firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, getDocs, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Calendar, Send, User, Sparkles, Users, MessageSquare, Heart, Star, Info, Filter, ChevronDown, Plus, X, Bookmark, Share2, MoreHorizontal, Search } from 'lucide-react';
+import { MapPin, Calendar, Send, User, Sparkles, Users, MessageSquare, Heart, Star, Info, Filter, ChevronDown, Plus, X, Bookmark, Share2, MoreHorizontal, Search, AlertCircle } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { Link, useNavigate } from 'react-router-dom';
 import { getAiBuddyRecommendations, BuddyMatch } from '../../services/geminiBuddyService';
+import { runWithAiRotation } from '../../services/gemini';
 import { toast } from 'sonner';
 
 interface BuddyPost {
@@ -29,9 +30,14 @@ export const BuddyFinder: React.FC = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<BuddyPost[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [loadTimeout, setLoadTimeout] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [aiMatches, setAiMatches] = useState<BuddyMatch[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [hasAttemptedMatches, setHasAttemptedMatches] = useState(false);
   const getNextWeekend = () => {
     const today = new Date();
     const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
@@ -117,37 +123,110 @@ export const BuddyFinder: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'all' | 'nearby' | 'trending'>('all');
 
   useEffect(() => {
-    const q = query(collection(db, 'buddy_posts'), orderBy('created_at', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BuddyPost));
-      setPosts(newPosts);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'buddy_posts');
-    });
-    return () => unsubscribe();
-  }, []);
+    // Wait for user to be available (even if null for unauthenticated)
+    // This helps avoid race conditions during reload
+    if (user === undefined) return;
+
+    setLoadingPosts(true);
+    setLoadTimeout(false);
+    
+    const timer = setTimeout(() => {
+      if (loadingPosts) setLoadTimeout(true);
+    }, 8000);
+
+    try {
+      // Remove orderBy to avoid index issues on reload and potential SDK assertion errors
+      const q = query(collection(db, 'buddy_posts'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        clearTimeout(timer);
+        const newPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BuddyPost));
+        // Sort in memory
+        newPosts.sort((a, b) => {
+          const timeA = a.created_at?.seconds || 0;
+          const timeB = b.created_at?.seconds || 0;
+          return timeB - timeA;
+        });
+        setPosts(newPosts);
+        setLoadingPosts(false);
+        setLoadTimeout(false);
+      }, (error) => {
+        console.error('Error fetching buddy posts:', error);
+        clearTimeout(timer);
+        setLoadingPosts(false);
+        setLoadTimeout(false);
+      });
+      return () => {
+        unsubscribe();
+        clearTimeout(timer);
+      };
+    } catch (err) {
+      console.error('Error setting up buddy posts listener:', err);
+      clearTimeout(timer);
+      setLoadingPosts(false);
+    }
+  }, [retryCount, user]);
 
   useEffect(() => {
     const fetchAiMatches = async () => {
-      if (!profile || aiMatches.length > 0) return;
+      if (!profile || !profile.uid || aiMatches.length > 0 || hasAttemptedMatches) return;
+      
+      // Try to load from cache first
+      const cached = localStorage.getItem(`ai_matches_${profile.uid}`);
+      if (cached) {
+        try {
+          const { matches, timestamp } = JSON.parse(cached);
+          // Cache for 1 hour
+          if (Date.now() - timestamp < 3600000) {
+            setAiMatches(matches);
+            setHasAttemptedMatches(true);
+            return;
+          }
+        } catch (e) {
+          console.error('Error parsing cached matches:', e);
+        }
+      }
+
       setLoadingMatches(true);
+      setQuotaExceeded(false);
       try {
         const recommendations = await getAiBuddyRecommendations(profile);
         setAiMatches(recommendations);
-      } catch (err) {
+        setHasAttemptedMatches(true);
+        
+        // Cache the results
+        if (recommendations.length > 0) {
+          localStorage.setItem(`ai_matches_${profile.uid}`, JSON.stringify({
+            matches: recommendations,
+            timestamp: Date.now()
+          }));
+        }
+      } catch (err: any) {
         console.error('Error fetching AI matches:', err);
+        if (err.message === 'QUOTA_EXCEEDED') {
+          setQuotaExceeded(true);
+        }
+        setHasAttemptedMatches(true);
       } finally {
         setLoadingMatches(false);
       }
     };
     fetchAiMatches();
-  }, [profile]);
+  }, [profile, aiMatches.length, hasAttemptedMatches]);
+
+  const handleRefreshMatches = () => {
+    setAiMatches([]);
+    setHasAttemptedMatches(false);
+    setQuotaExceeded(false);
+    if (profile?.uid) {
+      localStorage.removeItem(`ai_matches_${profile.uid}`);
+    }
+  };
 
   useEffect(() => {
     const fetchMissingProfiles = async () => {
       if (posts.length === 0) return;
       
-      const uniqueUserIds = Array.from(new Set(posts.map(p => p.user_id)));
+      const uniqueUserIds = Array.from(new Set(posts.map(p => p.user_id).filter((id): id is string => !!id && typeof id === 'string')));
       const missingIds = uniqueUserIds.filter(id => !userProfiles[id]);
 
       if (missingIds.length > 0) {
@@ -155,7 +234,7 @@ export const BuddyFinder: React.FC = () => {
         const newProfiles: Record<string, any> = {};
         
         await Promise.all(profilesToFetch.map(async (uid) => {
-          if (!uid) return;
+          if (!uid || typeof uid !== 'string') return;
           try {
             const userDoc = await getDocs(query(collection(db, 'users'), where('uid', '==', uid)));
             if (!userDoc.empty) {
@@ -306,10 +385,30 @@ export const BuddyFinder: React.FC = () => {
 
   const filteredPosts = posts.filter(post => {
     const matchesLocation = !filters.location || post.location?.toLowerCase().includes(filters.location.toLowerCase());
-    const matchesTripType = filters.tripType === 'Any' || post.group_type === filters.tripType;
-    // Add more filter logic as needed
+    
+    // Handle mismatch and "Any" filter
+    let matchesTripType = filters.tripType === 'Any';
+    if (!matchesTripType) {
+      const type = post.group_type || 'Open to all';
+      if (filters.tripType === 'Couple' && (type === 'Couple' || type === 'Couples')) matchesTripType = true;
+      else if (filters.tripType === 'Small Group' && (type === 'Small Group' || type === 'Friends' || type === 'Group')) matchesTripType = true;
+      else if (type === filters.tripType) matchesTripType = true;
+    }
+
+    // Tab filtering
+    if (activeTab === 'nearby' && profile?.location_city) {
+      const postLoc = post.location?.toLowerCase() || '';
+      const userLoc = profile.location_city.toLowerCase();
+      if (!postLoc.includes(userLoc)) return false;
+    }
+
     return matchesLocation && matchesTripType;
   });
+
+  // Sort by trending if activeTab is trending
+  const finalPosts = activeTab === 'trending' 
+    ? [...filteredPosts].sort((a, b) => (b.interested_count || 0) - (a.interested_count || 0))
+    : filteredPosts;
 
   return (
     <div className="min-h-screen bg-[#F8F9FD] pb-24">
@@ -504,8 +603,8 @@ export const BuddyFinder: React.FC = () => {
                       >
                         <option value="Open to all">Open to all</option>
                         <option value="Solo">Solo</option>
-                        <option value="Couples">Couples</option>
-                        <option value="Friends">Friends</option>
+                        <option value="Couple">Couple</option>
+                        <option value="Small Group">Small Group</option>
                       </select>
                       <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none group-hover/select:text-indigo-500 transition-colors" />
                     </div>
@@ -665,8 +764,38 @@ export const BuddyFinder: React.FC = () => {
 
             {/* Feed */}
             <div className="space-y-4">
-              <AnimatePresence>
-                {filteredPosts.map((post) => {
+              {loadingPosts ? (
+                <div className="space-y-4">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-pulse">
+                      <div className="flex items-center space-x-4 mb-4">
+                        <div className="w-12 h-12 bg-gray-100 rounded-xl" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-4 bg-gray-100 rounded w-1/4" />
+                          <div className="h-3 bg-gray-100 rounded w-1/6" />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="h-4 bg-gray-100 rounded w-3/4" />
+                        <div className="h-4 bg-gray-100 rounded w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                  {loadTimeout && (
+                    <div className="text-center py-8 bg-white rounded-3xl border border-dashed border-gray-200">
+                      <p className="text-sm text-gray-500 mb-4 font-medium">Loading is taking longer than usual...</p>
+                      <button 
+                        onClick={() => setRetryCount(prev => prev + 1)}
+                        className="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-200 hover:shadow-xl transition-all"
+                      >
+                        Retry Loading
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : finalPosts.length > 0 ? (
+                <AnimatePresence>
+                  {finalPosts.map((post) => {
                   const postProfile = userProfiles[post.user_id];
                   const photoUrl = postProfile?.photo_url || post.user_photo_url;
                   const userName = postProfile?.name || post.user_name;
@@ -790,6 +919,27 @@ export const BuddyFinder: React.FC = () => {
                   );
                 })}
               </AnimatePresence>
+              ) : (
+                <div className="bg-white rounded-[2rem] p-12 text-center border border-dashed border-gray-200">
+                  <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Users className="w-10 h-10 text-gray-300" />
+                  </div>
+                  <h3 className="text-xl font-black text-gray-900 mb-2">No travel plans found</h3>
+                  <p className="text-gray-500 font-medium max-w-xs mx-auto mb-8">
+                    {activeTab === 'nearby' 
+                      ? "There are no plans near your location yet. Be the first to post one!"
+                      : "Try adjusting your filters or be the first to share your travel plan!"}
+                  </p>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                    className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-indigo-100"
+                  >
+                    Post a Plan
+                  </motion.button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -806,6 +956,15 @@ export const BuddyFinder: React.FC = () => {
                     <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Powered by Gemini AI</p>
                   </div>
                 </div>
+                {aiMatches.length > 0 && !loadingMatches && (
+                  <button 
+                    onClick={handleRefreshMatches}
+                    className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                    title="Refresh Matches"
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
+                )}
               </div>
               
               <div className="space-y-8">
@@ -822,6 +981,22 @@ export const BuddyFinder: React.FC = () => {
                       <div className="h-20 bg-gray-50 rounded-2xl" />
                     </div>
                   ))
+                ) : quotaExceeded ? (
+                  <div className="text-center py-12 bg-amber-50 rounded-[2rem] border border-amber-100 p-6">
+                    <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <AlertCircle className="w-8 h-8 text-amber-600" />
+                    </div>
+                    <h4 className="text-sm font-black text-amber-900 uppercase tracking-widest mb-2">Daily Quota Reached</h4>
+                    <p className="text-[11px] text-amber-700 font-medium leading-relaxed mb-6">
+                      AI recommendations are temporarily unavailable as the daily limit has been reached. Please check back tomorrow!
+                    </p>
+                    <button 
+                      onClick={handleRefreshMatches}
+                      className="px-6 py-2 bg-white border border-amber-200 text-amber-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-amber-100 transition-all"
+                    >
+                      Try Again
+                    </button>
+                  </div>
                 ) : aiMatches.length > 0 ? (
                   aiMatches.map((match) => (
                     <motion.div 

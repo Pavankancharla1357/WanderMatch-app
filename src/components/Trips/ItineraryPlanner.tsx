@@ -717,20 +717,6 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
           )}
         </div>
       </div>
-
-      {initialItinerary && (
-        <div className="mt-12 pt-12 border-t border-gray-100">
-          <div className="bg-amber-50 p-8 rounded-[2rem] border border-amber-100">
-            <h4 className="text-sm font-bold text-amber-900 mb-4 uppercase tracking-widest flex items-center">
-              <CalendarDays className="w-4 h-4 mr-2" />
-              Organizer's Initial Vision
-            </h4>
-            <p className="text-amber-800 text-sm whitespace-pre-wrap leading-relaxed italic opacity-80">
-              {typeof initialItinerary === 'string' ? initialItinerary : JSON.stringify(initialItinerary, null, 2)}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
