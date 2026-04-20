@@ -25,6 +25,14 @@
         "phone_number": { "type": "string" },
         "is_phone_verified": { "type": "boolean" },
         "is_verified": { "type": "boolean" },
+        "travel_stats": {
+          "type": "object",
+          "properties": {
+            "total_distance": { "type": "number", "description": "Sum of distances of all completed trips in km" },
+            "total_trips": { "type": "integer", "description": "Count of completed trips" },
+            "unique_places": { "type": "integer", "description": "Count of unique destination cities visited" }
+          }
+        },
         "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "name"]
@@ -73,6 +81,9 @@
         "created_by": { "type": "string" },
         "created_by_name": { "type": "string" },
         "status": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "is_reached": { "type": "boolean" },
         "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["trip_id", "title", "day"]
@@ -291,6 +302,19 @@
         "deleted": { "type": "boolean" },
         "deleted_at": { "type": "string", "format": "date-time" }
       }
+    },
+    "BillingRecord": {
+      "title": "Billing Record",
+      "description": "User transaction record",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "label": { "type": "string" },
+        "amount": { "type": "string" },
+        "status": { "type": "string", "enum": ["Success", "Pending", "Failed"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["label", "amount", "status", "created_at"]
     }
   },
   "firestore": {
@@ -298,6 +322,7 @@
     "/users/{userId}/safety_contacts/{contactId}": { "schema": "SafetyContact", "description": "User emergency contacts" },
     "/users/{userId}/documents/{documentId}": { "schema": "ScannedDocument", "description": "User's scanned travel documents" },
     "/users/{userId}/chat_settings/{chatId}": { "schema": "ChatSettings", "description": "User-specific chat settings" },
+    "/users/{userId}/billing_history/{recordId}": { "schema": "BillingRecord", "description": "User billing history" },
     "/trips/{tripId}": { "schema": "Trip", "description": "Trips" },
     "/trips/{tripId}/members/{memberId}": { "schema": "TripMember", "description": "Trip members" },
     "/trips/{tripId}/expenses/{expenseId}": { "schema": "Expense", "description": "Trip expenses" },

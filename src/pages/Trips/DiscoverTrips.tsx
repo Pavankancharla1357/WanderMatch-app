@@ -395,6 +395,17 @@ export const DiscoverTrips: React.FC = () => {
     return sorted.length > 0 ? sorted : ['Goa', 'Manali', 'Ladakh', 'Rishikesh', 'Udaipur'];
   }, [trips]);
 
+  const isFiltering = useMemo(() => {
+    return searchTerm.trim() !== '' || 
+           selectedTags.length > 0 || 
+           filters.startDate !== '' || 
+           filters.endDate !== '' || 
+           filters.travelStyle !== '' || 
+           filters.startingCity !== '' ||
+           filters.maxBudget !== 100000 ||
+           filters.maxGroupSize !== 20;
+  }, [searchTerm, selectedTags, filters]);
+
   const recommendedTrips = filteredTrips.filter(t => calculateCompatibility(t) && calculateCompatibility(t)! >= 80).slice(0, 3);
   const nearbyTrips = filteredTrips.filter(t => userLocation && t.destination_lat && calculateDistance(userLocation.lat, userLocation.lng, t.destination_lat, t.destination_lng) < 500).slice(0, 3);
   
@@ -791,8 +802,8 @@ export const DiscoverTrips: React.FC = () => {
 
       {/* Results */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-20">
-        {/* Personalization Sections */}
-        {user && !loading && filteredTrips.length > 0 && (
+        {/* Personalization Sections - Only show when not actively filtering */}
+        {user && !loading && !isFiltering && filteredTrips.length > 0 && (
           <div className="space-y-32 mb-32">
             {recommendedTrips.length > 0 && (
               <section>
@@ -884,8 +895,14 @@ export const DiscoverTrips: React.FC = () => {
 
         {/* Main Feed */}
         <div className="mb-12">
-          <h2 className="text-3xl font-black text-gray-900 tracking-tight mb-2">All Adventures</h2>
-          <p className="text-gray-500 font-medium">Browse through all upcoming trips from our community</p>
+          <h2 className="text-3xl font-black text-gray-900 tracking-tight mb-2">
+            {isFiltering ? 'Search Results' : 'All Adventures'}
+          </h2>
+          <p className="text-gray-500 font-medium">
+            {isFiltering 
+              ? `Found ${filteredTrips.length} ${filteredTrips.length === 1 ? 'trip' : 'trips'} matching your criteria`
+              : 'Browse through all upcoming trips from our community'}
+          </p>
         </div>
 
         {loading ? (

@@ -141,6 +141,11 @@ service cloud.firestore {
       match /chat_settings/{chatId} {
         allow read, write: if isOwner(userId);
       }
+
+      match /billing_history/{recordId} {
+        allow read: if isOwner(userId);
+        allow write: if isAdmin();
+      }
     }
 
     match /trips/{tripId} {

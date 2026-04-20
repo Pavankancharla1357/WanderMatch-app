@@ -9,6 +9,7 @@ import { TripCard } from '../../components/Trips/TripCard';
 import { ReviewSystem } from '../../components/Profile/ReviewSystem';
 import { EditProfileModal } from '../../components/Profile/EditProfileModal';
 import { TravelVibeQuiz } from '../../components/Profile/TravelVibeQuiz';
+import { TravelStats } from '../../components/Profile/TravelStats';
 import { subscribeToUserRating } from '../../services/reviewService';
 
 export const Profile: React.FC = () => {
@@ -254,6 +255,8 @@ export const Profile: React.FC = () => {
               >
                 {activeTab === 'about' && (
                   <div className="space-y-6">
+                    <TravelStats stats={profile.travel_stats} />
+                    
                     <div className="bg-white p-8 sm:p-10 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-bl-[5rem] -mr-8 -mt-8 opacity-50" />
                       <h3 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-3">

@@ -1,5 +1,4 @@
-import { ThinkingLevel } from "@google/genai";
-import { getGeminiInstance } from "./gemini";
+import { getGeminiInstance, runWithAiRotation } from "./gemini";
 
 export interface ItinerarySuggestion {
   title: string;
@@ -79,13 +78,14 @@ export const generateFullItinerary = async (
       }
     `;
 
-    const result = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
-      }
+    const result = await runWithAiRotation(async (ai) => {
+      return await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
     });
 
     const text = result.text;
@@ -117,13 +117,14 @@ export const getAiItinerarySuggestions = async (
       - duration: string (e.g., "2 hours", "Full day")
     `;
 
-    const result = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
-      }
+    const result = await runWithAiRotation(async (ai) => {
+      return await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
     });
 
     const text = result.text;
@@ -132,5 +133,54 @@ export const getAiItinerarySuggestions = async (
   } catch (error: any) {
     console.error("Error getting AI itinerary suggestions:", error);
     throw error;
+  }
+};
+
+/**
+ * Extracts specific, searchable place names from a description.
+ * Returns a list of potential search queries to try in order.
+ */
+export const extractSearchQueries = async (text: string, contextCity?: string): Promise<string[]> => {
+  try {
+    const ai = getAi();
+    const prompt = `
+      Extract searchable place names from this travel activity. Provide multiple variations from specific to broad.
+      Include the destination city context if helpful.
+      
+      Activity: "${text}"
+      ${contextCity ? `Destination City Context: ${contextCity}` : ""}
+      
+      Return a JSON array of strings.
+      Example: "Breakfast at local cafe near Eiffel Tower" -> ["Eiffel Tower", "Cafe near Eiffel Tower", "Paris"]
+      Example: "Start trek to Ghandruk village" -> ["Ghandruk village", "Ghandruk", "Nepal"]
+    `;
+
+    const response = await runWithAiRotation(async (ai) => {
+      return await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+    });
+
+    const resultText = response.text;
+    if (!resultText) return [text];
+    
+    try {
+      const queries = JSON.parse(resultText);
+      if (Array.isArray(queries)) {
+        // Ensure the original text is at the end as a last resort
+        return [...new Set([...queries, text])];
+      }
+    } catch (e) {
+      console.error("Failed to parse AI response as JSON:", resultText);
+    }
+    
+    return [text];
+  } catch (error) {
+    console.error("Error extracting search queries:", error);
+    return [text];
   }
 };

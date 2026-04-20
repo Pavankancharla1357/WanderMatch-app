@@ -3,6 +3,7 @@ import { db } from '../../firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, increment } from 'firebase/firestore';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { toast } from 'sonner';
 import { 
   Plus, 
   ThumbsUp, 
@@ -23,10 +24,13 @@ import {
   Send,
   X,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Navigation
 } from 'lucide-react';
+import { geocodeLocation } from '../../services/geocodingService';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
-import { getAiItinerarySuggestions, ItinerarySuggestion } from '../../services/geminiItineraryService';
+import { getAiItinerarySuggestions, ItinerarySuggestion, extractSearchQueries } from '../../services/geminiItineraryService';
+import { getFriendlyAiError } from '../../services/gemini';
 
 interface ItineraryPlannerProps {
   tripId: string;
@@ -35,6 +39,8 @@ interface ItineraryPlannerProps {
   initialItinerary?: any;
   destination?: string;
   travelStyle?: string;
+  itineraryItems?: any[];
+  onMarkReached?: (id: string) => Promise<void>;
 }
 
 const ACTIVITY_TYPES = [
@@ -45,9 +51,10 @@ const ACTIVITY_TYPES = [
   { id: 'other', label: 'Other', icon: MoreHorizontal, color: 'text-gray-600', bg: 'bg-gray-50' },
 ];
 
-export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMember, isOrganizer, initialItinerary, destination, travelStyle }) => {
+export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMember, isOrganizer, initialItinerary, destination, travelStyle, itineraryItems, onMarkReached }) => {
   const { user, profile } = useAuth();
-  const [items, setItems] = useState<any[]>([]);
+  const [internalItems, setInternalItems] = useState<any[]>([]);
+  const items = itineraryItems || internalItems;
   const [newItem, setNewItem] = useState({ title: '', location: '', time: '', day: 1, type: 'activity', budget: '' });
   const [isAdding, setIsAdding] = useState(false);
   const [activeDay, setActiveDay] = useState(1);
@@ -57,14 +64,17 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showAiPanel, setShowAiPanel] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
+    if (itineraryItems) return; // Use prop if provided
     const q = query(collection(db, `trips/${tripId}/itinerary`), orderBy('day', 'asc'), orderBy('votes_count', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setInternalItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
-  }, [tripId]);
+  }, [tripId, itineraryItems]);
 
   const days = useMemo(() => {
     const uniqueDays = Array.from(new Set(items.map(item => item.day)));
@@ -81,6 +91,22 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
     if (!user || !newItem.title.trim()) return;
 
     try {
+      setIsGeocoding(true);
+      
+      // Try to geocode the location
+      let lat = null, lng = null;
+      if (newItem.location.trim()) {
+        const geoResult = await geocodeLocation(newItem.location.trim());
+        if (geoResult) {
+          lat = geoResult.lat;
+          lng = geoResult.lon;
+        }
+      }
+
+      // Calculate order (next index for the day)
+      const dayItems = items.filter(item => item.day === newItem.day);
+      const order = dayItems.length;
+
       await addDoc(collection(db, `trips/${tripId}/itinerary`), {
         trip_id: tripId,
         title: newItem.title.trim(),
@@ -89,11 +115,15 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
         day: newItem.day,
         type: newItem.type,
         budget: newItem.budget.trim(),
+        order,
+        latitude: lat,
+        longitude: lng,
+        is_reached: false,
         created_by: user.uid,
         created_by_name: profile?.name || 'Member',
         votes: [],
         votes_count: 0,
-        status: 'proposed',
+        status: 'confirmed', // Set confirmed immediately when manually added
         comments: [],
         created_at: serverTimestamp()
       });
@@ -101,6 +131,154 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/itinerary`);
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  const handleSyncToMap = async () => {
+    if (!user || !isOrganizer) return;
+    
+    setIsSyncing(true);
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    try {
+      // Case 1: If we have itinerary items but they are missing coordinates
+      if (items.length > 0 && items.some(item => !item.latitude && !item.lat)) {
+        toast.info('AI is analyzing location names and finding coordinates... 🌍');
+        let successCount = 0;
+        
+        for (const [index, item] of items.entries()) {
+          if (!item.latitude && !item.lat && (item.location || item.title)) {
+            // Add delay to respect Nominatim rate limits (1 req/sec)
+            if (index > 0) await sleep(1100);
+
+            const rawDescription = item.location || item.title;
+            // Use AI to extract multiple search variations
+            const queries = await extractSearchQueries(rawDescription, destination);
+            
+            let geo = null;
+            for (const queryText of queries) {
+              const contextualQuery = destination && !queryText.toLowerCase().includes(destination.toLowerCase()) 
+                ? `${queryText}, ${destination}` 
+                : queryText;
+              
+              geo = await geocodeLocation(contextualQuery);
+              if (geo) break;
+            }
+
+            if (geo) {
+              await updateDoc(doc(db, `trips/${tripId}/itinerary`, item.id), {
+                latitude: geo.lat,
+                longitude: geo.lon
+              });
+              successCount++;
+            }
+          }
+        }
+        
+        if (successCount > 0) {
+          toast.success(`Successfully mapped ${successCount} activities!`);
+        } else {
+          toast.error('Could not find precise coordinates. try adding specific landmark names.');
+        }
+        setIsSyncing(false);
+        return;
+      }
+
+      // Case 2: If items is empty but initialItinerary exists
+      if (!initialItinerary) {
+        toast.error('No itinerary data to sync.');
+        return;
+      }
+
+      let daysToProcess: any[] = [];
+      
+      if (typeof initialItinerary === 'object' && !Array.isArray(initialItinerary) && initialItinerary.days) {
+        daysToProcess = initialItinerary.days;
+      } else if (Array.isArray(initialItinerary)) {
+        daysToProcess = initialItinerary;
+      }
+
+      const totalSteps = daysToProcess.reduce((acc, day) => acc + (Array.isArray(day.plan) ? day.plan.length : (Array.isArray(day.activities) ? day.activities.length : 0)), 0);
+      toast.info(`Generating Map... This will take about ${Math.ceil(totalSteps * 1.2)} seconds. ⏳`);
+
+      let processedCount = 0;
+      for (const dayObj of daysToProcess) {
+        const day = dayObj.day || 1;
+        const plans = Array.isArray(dayObj.plan) ? dayObj.plan : 
+                    (Array.isArray(dayObj.activities) ? dayObj.activities.map((a: string) => ({ activity: a })) : []);
+        
+        for (let i = 0; i < plans.length; i++) {
+          const plan = plans[i];
+          const title = typeof plan === 'string' ? plan : (plan.activity || plan.title || 'Untitled Activity');
+          const location = typeof plan === 'string' ? '' : (plan.location || '');
+          const time = typeof plan === 'string' ? '' : (plan.time || '');
+          
+          // Duplicate check
+          const isDuplicate = items.some(item => 
+            item.title === title && item.day === day && item.time === time
+          );
+          
+          if (isDuplicate) {
+            processedCount++;
+            continue;
+          }
+
+          // Rate limiting delay
+          if (processedCount > 0) await sleep(1100);
+
+          let lat = null, lng = null;
+          const rawDescription = location || title;
+          if (rawDescription) {
+            // Use AI to extract multiple search variations
+            const queries = await extractSearchQueries(rawDescription, destination);
+            
+            let geo = null;
+            for (const queryText of queries) {
+              const contextualQuery = destination && !queryText.toLowerCase().includes(destination.toLowerCase()) 
+                ? `${queryText}, ${destination}` 
+                : queryText;
+              
+              geo = await geocodeLocation(contextualQuery);
+              if (geo) break;
+            }
+
+            if (geo) {
+              lat = geo.lat;
+              lng = geo.lon;
+            }
+          }
+
+          await addDoc(collection(db, `trips/${tripId}/itinerary`), {
+            trip_id: tripId,
+            title,
+            location,
+            time,
+            day,
+            order: i,
+            latitude: lat,
+            longitude: lng,
+            is_reached: false,
+            created_by: user.uid,
+            created_by_name: profile?.name || 'System Sync',
+            votes: [],
+            votes_count: 0,
+            status: 'confirmed',
+            comments: [],
+            created_at: serverTimestamp()
+          });
+          
+          processedCount++;
+        }
+      }
+      
+      toast.success('Map data generated successfully!');
+    } catch (error) {
+      console.error('Error syncing map data:', error);
+      toast.error('Failed to sync map items.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -181,7 +359,7 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
       }
     } catch (err: any) {
       console.error('Error fetching suggestions:', err);
-      setAiError(err.message || "Failed to fetch AI suggestions. Please check your connection and try again.");
+      setAiError(getFriendlyAiError(err));
     } finally {
       setLoadingSuggestions(false);
     }
@@ -245,6 +423,20 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
             >
               <Plus className="w-4 h-4" />
               <span>Propose Activity</span>
+            </button>
+          )}
+          {isOrganizer && (
+            <button
+              onClick={handleSyncToMap}
+              disabled={isSyncing}
+              className={`flex items-center space-x-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <Navigation className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>
+                {isSyncing 
+                  ? 'Syncing...' 
+                  : (items.length > 0 && items.some(i => !i.latitude && !i.lat) ? 'Fix Map Pins' : 'Sync with Map')}
+              </span>
             </button>
           )}
         </div>
@@ -463,9 +655,17 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                 </button>
                 <button
                   type="submit"
-                  className="px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100"
+                  disabled={isGeocoding}
+                  className={`px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-2 ${isGeocoding ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  Propose Activity
+                  {isGeocoding ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Propose Activity'
+                  )}
                 </button>
               </div>
             </form>
@@ -527,6 +727,12 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                             {getTypeIcon(item.type)}
                             <span className="ml-2">{item.type}</span>
                           </span>
+                          {item.is_reached && (
+                            <span className="px-4 py-1.5 bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-xl flex items-center shadow-sm border border-emerald-100">
+                              <CheckCircle2 className="w-3 h-3 mr-2" />
+                              Reached
+                            </span>
+                          )}
                           {isConfirmed && (
                             <span className="px-4 py-1.5 bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-xl flex items-center shadow-sm border border-emerald-100">
                               <Check className="w-3 h-3 mr-2" strokeWidth={3} />
@@ -594,6 +800,15 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ tripId, isMe
                                 </span>
                               )}
                             </button>
+                            {onMarkReached && !item.is_reached && (
+                              <button
+                                onClick={() => onMarkReached(item.id)}
+                                className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100 hover:bg-emerald-600 hover:text-white transition-all group"
+                                title="Mark as Reached"
+                              >
+                                <CheckCircle2 className="w-5 h-5" />
+                              </button>
+                            )}
                             {isOrganizer && (
                               <button
                                 onClick={() => handleConfirm(item.id, item.status)}

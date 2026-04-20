@@ -86,12 +86,20 @@ export async function runWithAiRotation<T>(task: (ai: GoogleGenAI) => Promise<T>
       return await task(ai);
     } catch (error: any) {
       lastError = error;
-      const isQuotaError = error?.message?.includes('429') || 
-                          error?.message?.includes('Quota exceeded') ||
-                          error?.status === 'RESOURCE_EXHAUSTED';
+      const message = error?.message || '';
+      const isQuotaError = message.includes('429') || 
+                          message.includes('Quota exceeded') ||
+                          message.includes('RESOURCE_EXHAUSTED');
       
-      if (isQuotaError && i < keys.length - 1) {
-        console.warn(`Gemini Key ${i + 1} exhausted, rotating to next key...`);
+      const isServerError = message.includes('503') || 
+                           message.includes('500') ||
+                           message.includes('overloaded') ||
+                           message.includes('Service Unavailable');
+      
+      if ((isQuotaError || isServerError) && i < keys.length - 1) {
+        console.warn(`Gemini Key ${i + 1} issue (${isQuotaError ? 'Quota' : 'Server'}), rotating to next key...`);
+        // Small delay before retry if it's a server error
+        if (isServerError) await new Promise(r => setTimeout(r, 1000));
         continue;
       }
       throw error;
@@ -104,19 +112,49 @@ export async function runWithAiRotation<T>(task: (ai: GoogleGenAI) => Promise<T>
  * Parses complex AI error objects into simple, user-friendly messages.
  */
 export const getFriendlyAiError = (error: any): string => {
-  const message = error?.message || String(error);
+  console.error("AI Error:", error);
+  const message = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+  const lowMessage = message.toLowerCase();
   
-  if (message.includes('429') || message.includes('Quota exceeded') || message.includes('RESOURCE_EXHAUSTED')) {
+  if (lowMessage.includes('429') || lowMessage.includes('quota') || lowMessage.includes('limit reached')) {
     return "AI daily limit reached. Please try again later or add another API key in Settings.";
   }
   
-  if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
+  if (lowMessage.includes('key') && (lowMessage.includes('invalid') || lowMessage.includes('not valid'))) {
     return "Invalid API Key. Please check your Gemini API key in Settings.";
   }
 
-  if (message.includes('safety') || message.includes('blocked')) {
+  if (lowMessage.includes('api key is missing')) {
+    return "Gemini API Key is missing. Please set GEMINI_API_KEY in the Secrets menu (Settings > Secrets).";
+  }
+
+  if (lowMessage.includes('403') || lowMessage.includes('permission') || lowMessage.includes('access')) {
+    return "Permission denied. Your API key might not have access to this AI model. Please check your Google AI Studio account.";
+  }
+
+  if (lowMessage.includes('safety') || lowMessage.includes('block')) {
     return "The request was blocked by AI safety filters. Please try a different prompt.";
   }
 
-  return "AI service is temporarily unavailable. Please try again later.";
+  if (lowMessage.includes('503') || lowMessage.includes('overloaded') || lowMessage.includes('high traffic') || lowMessage.includes('service unavailable')) {
+    return "The AI service is currently overwhelmed by high traffic. Please wait 10 seconds and try again.";
+  }
+
+  if (lowMessage.includes('500') || lowMessage.includes('internal error')) {
+    return "AI Internal Server Error. Please try again in a moment.";
+  }
+
+  if (lowMessage.includes('json') || lowMessage.includes('syntax') || lowMessage.includes('parse') || lowMessage.includes('invalid response format')) {
+    return "AI returned an invalid response. Please try clicking the button again.";
+  }
+
+  if (lowMessage.includes('fetch') || lowMessage.includes('network') || lowMessage.includes('offline') || lowMessage.includes('failed to fetch')) {
+    return "Network error. Please check your internet connection.";
+  }
+
+  if (lowMessage.includes('model') && (lowMessage.includes('not found') || lowMessage.includes('not exist'))) {
+    return "The AI model is not available. Please try again later.";
+  }
+
+  return `AI service is temporarily unavailable. (Detail: ${message.slice(0, 60)}...). Please try again later.`;
 };

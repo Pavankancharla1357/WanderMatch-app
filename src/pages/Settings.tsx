@@ -36,12 +36,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/Auth/AuthContext';
 import { auth, db } from '../firebase';
 import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider, RecaptchaVerifier, linkWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, deleteDoc, onSnapshot, query, collection, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { ImageUpload } from '../components/Common/ImageUpload';
 
-type SettingsView = 'main' | 'personal' | 'security' | 'payments' | 'notifications' | 'language' | 'appearance' | 'app' | 'help';
+type SettingsView = 'main' | 'personal' | 'security' | 'payments' | 'notifications' | 'language' | 'appearance' | 'app' | 'help' | 'safety';
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
@@ -80,6 +80,7 @@ export const Settings: React.FC = () => {
     location_country: '',
     photo_url: '',
     phone_number: '',
+    gender: 'prefer_not_to_say',
   });
 
   const [securityData, setSecurityData] = useState({
@@ -119,6 +120,7 @@ export const Settings: React.FC = () => {
         location_country: profile.location_country || '',
         photo_url: profile.photo_url || '',
         phone_number: profile.phone_number || '',
+        gender: profile.gender || 'prefer_not_to_say',
       });
       
       if (profile.settings) {
@@ -339,6 +341,7 @@ export const Settings: React.FC = () => {
       items: [
         { id: 'personal', icon: User, label: 'Personal Information', description: 'Update your name, bio, and travel style', color: 'text-blue-600', bg: 'bg-blue-50' },
         { id: 'security', icon: Shield, label: 'Security', description: 'Password, 2FA, and login activity', color: 'text-indigo-600', bg: 'bg-indigo-50' },
+        { id: 'safety', icon: Shield, label: 'Safety & Emergency', description: 'Emergency contacts and safety tools', color: 'text-red-600', bg: 'bg-red-50' },
         { id: 'payments', icon: CreditCard, label: 'Payments', description: 'Manage your saved cards and billing', color: 'text-emerald-600', bg: 'bg-emerald-50' },
       ]
     },
@@ -425,7 +428,7 @@ export const Settings: React.FC = () => {
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
             <button
               onClick={() => setShowLogoutConfirm(true)}
-              className="w-full flex items-center gap-4 p-4 hover:bg-red-50 transition-colors text-left"
+              className="w-full flex items-center gap-4 p-4 hover:bg-red-50 transition-colors text-left border-b border-gray-50"
             >
               <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-50 text-red-600">
                 <LogOut className="w-5 h-5" />
@@ -433,6 +436,19 @@ export const Settings: React.FC = () => {
               <div className="flex-1">
                 <p className="text-sm font-bold text-red-600">Log Out</p>
                 <p className="text-[10px] text-red-400 font-medium">Sign out of your account on this device</p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-red-200" />
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="w-full flex items-center gap-4 p-4 hover:bg-red-50 transition-colors text-left"
+            >
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-50 text-red-600">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-red-600">Delete Account</p>
+                <p className="text-[10px] text-red-400 font-medium">Permanently delete your account and all data</p>
               </div>
               <ChevronRight className="w-4 h-4 text-red-200" />
             </button>
@@ -502,6 +518,29 @@ export const Settings: React.FC = () => {
                   className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
                   placeholder="e.g. India"
                 />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Gender</label>
+              <div className="flex gap-2">
+                {[
+                  { id: 'male', label: 'Male' },
+                  { id: 'female', label: 'Female' },
+                  { id: 'other', label: 'Other' },
+                  { id: 'prefer_not_to_say', label: 'Private' }
+                ].map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setPersonalData({ ...personalData, gender: g.id })}
+                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      personalData.gender === g.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -681,6 +720,7 @@ export const Settings: React.FC = () => {
   );
 
   const [savedCards, setSavedCards] = useState<any[]>([]);
+  const [billingHistory, setBillingHistory] = useState<any[]>([]);
 
   useEffect(() => {
     if (profile?.settings?.payments?.cards) {
@@ -689,6 +729,35 @@ export const Settings: React.FC = () => {
       setSavedCards([{ id: '1', type: 'Visa', last4: '4242', expiry: '12/25', holder: profile.name }]);
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'users', user.uid, 'billing_history'),
+      orderBy('created_at', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty && profile?.name) {
+        // Seed demo data once if empty
+        const initialHistory = [
+          { label: 'Premium Subscription', amount: '₹499', status: 'Success', created_at: new Date(Date.now() - 86400000 * 30).toISOString(), user_id: user.uid },
+          { label: 'Trip Booking - Manali', amount: '₹12,500', status: 'Success', created_at: new Date(Date.now() - 86400000 * 45).toISOString(), user_id: user.uid }
+        ];
+        for (const item of initialHistory) {
+          await addDoc(collection(db, 'users', user.uid, 'billing_history'), item);
+        }
+        return;
+      }
+      setBillingHistory(snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        date: doc.data().created_at ? new Date(doc.data().created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown Date'
+      })));
+    }, (error) => {
+      console.error("Billing history listener error:", error);
+    });
+    return () => unsubscribe();
+  }, [user, profile]);
 
   const handleToggle2FA = async () => {
     if (!user) return;
@@ -737,6 +806,7 @@ export const Settings: React.FC = () => {
         'settings.payments.cards': updatedCards,
         updated_at: new Date().toISOString(),
       });
+      await refreshProfile();
       toast.success('New payment method added');
       setShowAddCardModal(false);
       setNewCardData({ number: '', expiry: '', cvv: '', holder: '', type: 'Visa' });
@@ -748,6 +818,8 @@ export const Settings: React.FC = () => {
 
   const handleDeleteCard = async (cardId: string) => {
     if (!user) return;
+    
+    // Optimistic update
     const updatedCards = savedCards.filter(c => c.id !== cardId);
     setSavedCards(updatedCards);
     
@@ -756,10 +828,15 @@ export const Settings: React.FC = () => {
         'settings.payments.cards': updatedCards,
         updated_at: new Date().toISOString(),
       });
+      await refreshProfile();
       toast.success('Payment method removed');
     } catch (error) {
       console.error(error);
       toast.error('Failed to remove card');
+      // Rollback
+      if (profile?.settings?.payments?.cards) {
+        setSavedCards(profile.settings.payments.cards);
+      }
     }
   };
 
@@ -789,6 +866,150 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+
+  const handleDeleteAccount = async () => {
+    if (!user || !user.email) return;
+    setLoading(true);
+    try {
+      // Re-authenticate first
+      const credential = EmailAuthProvider.credential(user.email, deletePassword);
+      await reauthenticateWithCredential(user, credential);
+      
+      // Delete from Firestore
+      await deleteDoc(doc(db, 'users', user.uid));
+      
+      // Delete from Auth
+      await user.delete();
+      
+      toast.success('Account deleted successfully');
+      navigate('/register');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || 'Failed to delete account. Please check your password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [safetyContacts, setSafetyContacts] = useState<any[]>([]);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [newContact, setNewContact] = useState({ name: '', phone: '', relationship: '' });
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'users', user.uid, 'safety_contacts'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSafetyContacts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleAddSafetyContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setLoading(true);
+    try {
+      await addDoc(collection(db, 'users', user.uid, 'safety_contacts'), {
+        ...newContact,
+        user_id: user.uid,
+        created_at: new Date().toISOString()
+      });
+      toast.success('Safety contact added');
+      setNewContact({ name: '', phone: '', relationship: '' });
+      setShowAddContact(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/safety_contacts`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSafetyContact = async (contactId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'safety_contacts', contactId));
+      toast.success('Contact removed');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/safety_contacts/${contactId}`);
+    }
+  };
+
+  const renderSafetyView = () => (
+    <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+      <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 space-y-6">
+        <div className="flex justify-between items-start">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Emergency Contacts</h3>
+            <p className="text-xs text-gray-500">People to alert in case of an emergency during your trips.</p>
+          </div>
+          <button 
+            onClick={() => setShowAddContact(true)}
+            className="p-3 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {safetyContacts.map(contact => (
+            <div key={contact.id} className="p-5 bg-gray-50 rounded-2xl border border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-red-500 shadow-sm">
+                  <User className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-gray-900">{contact.name}</p>
+                  <p className="text-[10px] text-gray-500 font-medium">{contact.relationship} • {contact.phone}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => handleDeleteSafetyContact(contact.id)}
+                className="p-2 text-gray-300 hover:text-red-500 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+          
+          {safetyContacts.length === 0 && (
+            <div className="text-center py-8">
+              <p className="text-sm text-gray-400">No emergency contacts added yet.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Safety Features</h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+            <div className="flex items-center gap-4">
+              <Shield className="w-5 h-5 text-indigo-500" />
+              <div>
+                <p className="text-sm font-bold text-gray-900">Live Location Sharing</p>
+                <p className="text-[10px] text-gray-500 italic">Automatically share with emergency contacts during trips</p>
+              </div>
+            </div>
+            <div className="w-10 h-5 bg-indigo-600 rounded-full flex items-center px-1">
+              <div className="w-3 h-3 bg-white rounded-full ml-auto" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const [offlineMaps, setOfflineMaps] = useState([
+    { id: 'm1', name: 'Manali & Surroundings', size: '124 MB', updated: '2 days ago' }
+  ]);
+
+  const handleDeleteMap = (mapId: string) => {
+    setOfflineMaps(prev => prev.filter(m => m.id !== mapId));
+    toast.success('Offline map removed');
+  };
+
   const renderPaymentsView = () => (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
@@ -796,20 +1017,24 @@ export const Settings: React.FC = () => {
         <div className="space-y-4">
           {savedCards.map((card) => (
             <div key={card.id} className="p-6 bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl text-white relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110" />
-              <div className="flex justify-between items-start mb-8">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110 pointer-events-none" />
+              <div className="relative z-10 flex justify-between items-start mb-8">
                 <CreditCard className="w-8 h-8 text-indigo-400" />
-                <div className="flex gap-2">
-                  <span className="text-xs font-black uppercase tracking-widest opacity-60">{card.type}</span>
+                <div className="flex gap-3 items-center">
+                  <span className="text-[10px] font-black uppercase tracking-widest opacity-60 bg-white/10 px-2 py-1 rounded-md">{card.type}</span>
                   <button 
-                    onClick={() => handleDeleteCard(card.id)}
-                    className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteCard(card.id);
+                    }}
+                    className="p-2 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-all group/del"
+                    title="Remove card"
                   >
-                    <Trash2 className="w-4 h-4 text-red-400" />
+                    <Trash2 className="w-4 h-4 text-red-400 group-hover/del:text-red-500 transition-colors" />
                   </button>
                 </div>
               </div>
-              <div className="space-y-4">
+              <div className="relative z-10 space-y-4">
                 <p className="text-xl font-mono tracking-[0.2em]">•••• •••• •••• {card.last4}</p>
                 <div className="flex justify-between items-end">
                   <div>
@@ -838,10 +1063,7 @@ export const Settings: React.FC = () => {
       <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
         <h3 className="text-lg font-bold text-gray-900 mb-6">Billing History</h3>
         <div className="space-y-4">
-          {[
-            { id: 1, label: 'Premium Subscription', date: 'Mar 15, 2024', amount: '₹499', status: 'Success' },
-            { id: 2, label: 'Trip Booking - Manali', date: 'Feb 28, 2024', amount: '₹12,500', status: 'Success' },
-          ].map((item) => (
+          {billingHistory.map((item) => (
             <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-gray-400">
@@ -854,10 +1076,18 @@ export const Settings: React.FC = () => {
               </div>
               <div className="text-right">
                 <p className="text-sm font-black text-gray-900">{item.amount}</p>
-                <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">{item.status}</p>
+                <p className={`text-[10px] font-bold uppercase tracking-widest ${item.status === 'Success' ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {item.status}
+                </p>
               </div>
             </div>
           ))}
+          
+          {billingHistory.length === 0 && (
+            <div className="text-center py-8">
+              <p className="text-xs text-gray-400">No transactions recorded yet.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1220,6 +1450,7 @@ export const Settings: React.FC = () => {
       case 'appearance': return 'Appearance';
       case 'app': return 'App Settings';
       case 'help': return 'Help Center';
+      case 'safety': return 'Safety & Emergency';
       default: return 'Settings';
     }
   };
@@ -1257,6 +1488,7 @@ export const Settings: React.FC = () => {
           {currentView === 'appearance' && renderAppearanceView()}
           {currentView === 'app' && renderAppView()}
           {currentView === 'help' && renderHelpView()}
+          {currentView === 'safety' && renderSafetyView()}
         </motion.div>
       </AnimatePresence>
 
@@ -1289,6 +1521,110 @@ export const Settings: React.FC = () => {
                 No, Stay Logged In
               </button>
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Account Deletion Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl"
+          >
+            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Trash2 className="w-8 h-8 text-red-500" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-2 text-center">Delete Account?</h3>
+            <p className="text-gray-600 mb-6 text-center">
+              This action is irreversible. Please enter your password to confirm.
+            </p>
+            <div className="space-y-4">
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder="Confirm password"
+                className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-red-500 outline-none transition-all text-sm font-medium"
+              />
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={loading || !deletePassword}
+                  className="w-full py-3.5 bg-red-500 text-white rounded-2xl font-bold hover:bg-red-600 transition-all shadow-lg shadow-red-100 disabled:opacity-50"
+                >
+                  {loading ? 'Deleting...' : 'Delete Permanently'}
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="w-full py-3.5 bg-gray-50 text-gray-700 rounded-2xl font-bold hover:bg-gray-100 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add Safety Contact Modal */}
+      {showAddContact && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-gray-900">Emergency Contact</h3>
+              <button onClick={() => setShowAddContact(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <X className="w-6 h-6 text-gray-400" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddSafetyContact} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newContact.name}
+                  onChange={(e) => setNewContact({ ...newContact, name: e.target.value })}
+                  className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
+                  placeholder="e.g. John Doe"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Phone Number</label>
+                <input
+                  type="tel"
+                  required
+                  value={newContact.phone}
+                  onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
+                  className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
+                  placeholder="e.g. +91 9876543210"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Relationship</label>
+                <input
+                  type="text"
+                  required
+                  value={newContact.relationship}
+                  onChange={(e) => setNewContact({ ...newContact, relationship: e.target.value })}
+                  className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm font-medium"
+                  placeholder="e.g. Spouse, Parent, Friend"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold hover:bg-gray-800 transition-all shadow-xl shadow-gray-100 mt-4 disabled:opacity-50"
+              >
+                {loading ? 'Adding...' : 'Add Contact'}
+              </button>
+            </form>
           </motion.div>
         </div>
       )}

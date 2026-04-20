@@ -24,7 +24,6 @@ import { ShareModal } from '../../components/Trips/ShareModal';
 import { EditTripModal } from '../../components/Trips/EditTripModal';
 import { DeleteTripModal } from '../../components/Trips/DeleteTripModal';
 import { ItineraryPlanner } from '../../components/Trips/ItineraryPlanner';
-import { TripMap } from '../../components/Trips/TripMap';
 import { 
   Calendar, 
   Users, 
@@ -54,10 +53,21 @@ import {
   Wallet,
   TrendingUp,
   Award,
-  ArrowRight
+  ArrowRight,
+  Navigation
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { SmartTripMap } from '../../components/Trips/SmartTripMap';
+import { 
+  extractSearchQueries, 
+  generateFullItinerary, 
+  getAiItinerarySuggestions 
+} from '../../services/geminiItineraryService';
+import { geocodeLocation } from '../../services/geocodingService';
+import { orderBy } from 'firebase/firestore';
+import { RefreshCw } from 'lucide-react';
+import { getFriendlyAiError } from '../../services/gemini';
 
 enum OperationType {
   CREATE = 'create',
@@ -117,13 +127,15 @@ const Section = ({
   icon: Icon, 
   children, 
   badge,
-  className = ""
+  className = "",
+  action
 }: { 
   title: string; 
   icon?: any; 
   children: React.ReactNode; 
   badge?: string;
   className?: string;
+  action?: React.ReactNode;
 }) => (
   <div className={`bg-white rounded-[2.5rem] p-8 md:p-10 shadow-xl shadow-gray-200/40 border border-gray-100/80 ${className}`}>
     <div className="flex items-center justify-between mb-8">
@@ -138,6 +150,7 @@ const Section = ({
           {badge && <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1 block">{badge}</span>}
         </div>
       </div>
+      {action && <div>{action}</div>}
     </div>
     <div className="prose prose-indigo max-w-none text-gray-600 leading-relaxed">
       {children}
@@ -211,7 +224,9 @@ const TripDetails: React.FC = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'itinerary'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'itinerary' | 'map' | 'members'>('overview');
+  const [itineraryItems, setItineraryItems] = useState<any[]>([]);
+  const [isSyncingMap, setIsSyncingMap] = useState(false);
   const [messaging, setMessaging] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -370,6 +385,181 @@ const TripDetails: React.FC = () => {
       console.error('Error initiating chat:', error);
     } finally {
       setMessaging(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!id) return;
+    const q = query(
+      collection(db, 'trips', id, 'itinerary'), 
+      orderBy('day', 'asc'), 
+      orderBy('time', 'asc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setItineraryItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [id]);
+
+  const handleSyncMap = async () => {
+    if (!trip || !user || !isOrganizer) return;
+    
+    setIsSyncingMap(true);
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    
+    try {
+      // Case 1: If we have itinerary items but they are missing coordinates
+      if (itineraryItems.length > 0 && itineraryItems.some(item => !item.latitude && !item.lat)) {
+        toast.info('AI is analyzing location names and finding coordinates... 🌍');
+        let successCount = 0;
+        
+        for (const [index, item] of itineraryItems.entries()) {
+          if (!item.latitude && !item.lat && (item.location || item.title)) {
+            // Add delay to respect Nominatim rate limits (1 req/sec)
+            if (index > 0) await sleep(1100);
+            
+            const rawDescription = item.location || item.title;
+            // Use AI to extract multiple search variations
+            const queries = await extractSearchQueries(rawDescription, trip.destination_city);
+            
+            let geo = null;
+            for (const queryText of queries) {
+              const contextualQuery = trip.destination_city && !queryText.toLowerCase().includes(trip.destination_city.toLowerCase()) 
+                ? `${queryText}, ${trip.destination_city}` 
+                : queryText;
+              
+              geo = await geocodeLocation(contextualQuery);
+              if (geo) break;
+            }
+
+            if (geo) {
+              await updateDoc(doc(db, `trips/${id}/itinerary`, item.id), {
+                latitude: geo.lat,
+                longitude: geo.lon
+              });
+              successCount++;
+            }
+          }
+        }
+        
+        if (successCount > 0) {
+          toast.success(`Successfully mapped ${successCount} activities!`);
+        } else {
+          toast.error('Could not find precise coordinates. Try adding specific landmark names.');
+        }
+        setIsSyncingMap(false);
+        return;
+      }
+
+      // Case 2: If itineraryItems is empty but trip.itinerary exists
+      if (!trip.itinerary) {
+        toast.error('No itinerary data to sync.');
+        return;
+      }
+
+      let daysToProcess: any[] = [];
+      const itinerary = trip.itinerary;
+      
+      if (typeof itinerary === 'object' && !Array.isArray(itinerary) && itinerary.days) {
+        daysToProcess = itinerary.days;
+      } else if (Array.isArray(itinerary)) {
+        daysToProcess = itinerary;
+      }
+
+      const totalSteps = daysToProcess.reduce((acc, day) => acc + (Array.isArray(day.plan) ? day.plan.length : (Array.isArray(day.activities) ? day.activities.length : 0)), 0);
+      
+      toast.info(`Generating Map for ${daysToProcess.length} days... This will take about ${Math.ceil(totalSteps * 1.2)} seconds. ⏳`);
+
+      let processedCount = 0;
+      for (const dayObj of daysToProcess) {
+        const day = dayObj.day || 1;
+        const plans = Array.isArray(dayObj.plan) ? dayObj.plan : 
+                    (Array.isArray(dayObj.activities) ? dayObj.activities.map((a: string) => ({ activity: a })) : []);
+        
+        for (let i = 0; i < plans.length; i++) {
+          const plan = plans[i];
+          const title = typeof plan === 'string' ? plan : (plan.activity || plan.title || 'Untitled Activity');
+          const location = typeof plan === 'string' ? '' : (plan.location || '');
+          const time = typeof plan === 'string' ? '' : (plan.time || '');
+          
+          // Check for duplicate
+          const isDuplicate = itineraryItems.some(item => 
+            item.title === title && item.day === day && item.time === time
+          );
+          
+          if (isDuplicate) {
+            processedCount++;
+            continue;
+          }
+
+          // Rate limiting delay
+          if (processedCount > 0) await sleep(1100);
+
+          let lat = null, lng = null;
+          const rawDescription = location || title;
+          if (rawDescription) {
+            // Use AI to extract multiple search variations
+            const queries = await extractSearchQueries(rawDescription, trip.destination_city);
+            
+            let geo = null;
+            for (const queryText of queries) {
+              const contextualQuery = trip.destination_city && !queryText.toLowerCase().includes(trip.destination_city.toLowerCase()) 
+                ? `${queryText}, ${trip.destination_city}` 
+                : queryText;
+              
+              geo = await geocodeLocation(contextualQuery);
+              if (geo) break;
+            }
+
+            if (geo) {
+              lat = geo.lat;
+              lng = geo.lon;
+            }
+          }
+
+          await addDoc(collection(db, `trips/${id}/itinerary`), {
+            trip_id: id,
+            title,
+            location,
+            time,
+            day,
+            order: i,
+            latitude: lat,
+            longitude: lng,
+            is_reached: false,
+            created_by: user.uid,
+            created_by_name: currentUserProfile?.name || 'System Sync',
+            votes: [],
+            votes_count: 0,
+            status: 'confirmed',
+            comments: [],
+            created_at: serverTimestamp()
+          });
+          
+          processedCount++;
+        }
+      }
+      setActiveTab('map');
+      toast.success('Your 9-day journey map is ready! 🗺️');
+    } catch (error) {
+      console.error('Error syncing map data:', error);
+      toast.error(getFriendlyAiError(error));
+    } finally {
+      setIsSyncingMap(false);
+    }
+  };
+
+  const handleMarkReached = async (itemId: string) => {
+    if (!id || !(isOrganizer || memberStatus === 'approved')) return;
+    try {
+      await updateDoc(doc(db, 'trips', id, 'itinerary', itemId), {
+        is_reached: true,
+        reached_at: serverTimestamp()
+      });
+      toast.success('Location marked as reached!');
+    } catch (error) {
+      console.error('Error marking as reached:', error);
+      toast.error('Failed to update status');
     }
   };
 
@@ -1031,10 +1221,10 @@ const TripDetails: React.FC = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex p-1.5 bg-gray-100/80 rounded-[2rem] mb-12 w-fit mx-auto md:mx-0">
+        <div className="flex p-1.5 bg-gray-100/80 rounded-[2rem] mb-12 w-fit mx-auto md:mx-0 overflow-x-auto no-scrollbar">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`px-10 py-4 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] transition-all duration-500 ${
+            className={`px-8 py-4 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] transition-all duration-500 whitespace-nowrap ${
               activeTab === 'overview' 
                 ? 'bg-white text-indigo-600 shadow-xl shadow-gray-200/50' 
                 : 'text-gray-500 hover:text-gray-700'
@@ -1044,13 +1234,33 @@ const TripDetails: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('itinerary')}
-            className={`px-10 py-4 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] transition-all duration-500 ${
+            className={`px-8 py-4 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] transition-all duration-500 whitespace-nowrap ${
               activeTab === 'itinerary' 
                 ? 'bg-white text-indigo-600 shadow-xl shadow-gray-200/50' 
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
             Itinerary
+          </button>
+          <button
+            onClick={() => setActiveTab('map')}
+            className={`px-8 py-4 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] transition-all duration-500 whitespace-nowrap ${
+              activeTab === 'map' 
+                ? 'bg-white text-indigo-600 shadow-xl shadow-gray-200/50' 
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Map View
+          </button>
+          <button
+            onClick={() => setActiveTab('members')}
+            className={`px-8 py-4 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] transition-all duration-500 whitespace-nowrap ${
+              activeTab === 'members' 
+                ? 'bg-white text-indigo-600 shadow-xl shadow-gray-200/50' 
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Members
           </button>
         </div>
 
@@ -1179,7 +1389,148 @@ const TripDetails: React.FC = () => {
                   <div className="absolute top-0 right-0 -mt-20 -mr-20 w-80 h-80 bg-indigo-600/20 rounded-full blur-[100px]" />
                   <div className="absolute bottom-0 left-0 -mb-20 -ml-20 w-80 h-80 bg-emerald-600/10 rounded-full blur-[100px]" />
                 </div>
+              </div>
+            ) : activeTab === 'itinerary' ? (
+              <div className="space-y-12">
+                {trip.itinerary && (
+                  <CollapsibleCard 
+                    title="Itinerary Summary" 
+                    icon={MapIcon} 
+                    isOpen={expandedSections.itinerary} 
+                    onToggle={() => toggleSection('itinerary')}
+                    badge={`${parseItinerary(trip.itinerary).length} Days Journey`}
+                  >
+                    <div className="space-y-6 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-gray-100">
+                      {parseItinerary(trip.itinerary).map((day, idx) => (
+                        <div key={idx} className="relative pl-10">
+                          <div className="absolute left-0 top-0 w-8 h-8 bg-white border-2 border-indigo-600 rounded-full flex items-center justify-center z-10">
+                            <span className="text-[10px] font-black text-indigo-600">{day.day}</span>
+                          </div>
+                          <div className="bg-gray-50/50 p-6 rounded-[2rem] border border-gray-100 hover:bg-white hover:shadow-xl hover:shadow-gray-200/30 transition-all cursor-pointer group" onClick={() => toggleDay(idx)}>
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="font-black text-gray-900 tracking-tight">Day {day.day}</h4>
+                              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-500 ${expandedDays[idx] ? 'rotate-180' : ''}`} />
+                            </div>
+                            {day.title && day.title !== 'Activities' && day.title !== 'Plan' && (
+                              <p className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-2">{day.title}</p>
+                            )}
+                            <AnimatePresence>
+                              {expandedDays[idx] && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  className="pt-4 border-t border-gray-100 mt-4"
+                                >
+                                  <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed font-medium">
+                                    {day.content}
+                                  </p>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleCard>
+                )}
 
+                <div className="bg-white p-10 md:p-12 rounded-[3rem] shadow-2xl shadow-gray-200/50 border border-gray-100">
+                  <ItineraryPlanner 
+                    tripId={id!} 
+                    isMember={memberStatus === 'approved' || isOrganizer} 
+                    isOrganizer={isOrganizer}
+                    initialItinerary={trip.itinerary}
+                    destination={trip.destination_city}
+                    travelStyle={trip.travel_style}
+                    itineraryItems={itineraryItems}
+                    onMarkReached={handleMarkReached}
+                  />
+                </div>
+              </div>
+            ) : activeTab === 'map' ? (
+              <div className="space-y-8">
+                <Section 
+                  title="Interactive Journey Map" 
+                  icon={MapIcon}
+                  action={
+                    isOrganizer && (
+                      <button 
+                        onClick={handleSyncMap}
+                        disabled={isSyncingMap}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all border border-indigo-100"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isSyncingMap ? 'animate-spin' : ''}`} />
+                        {isSyncingMap ? 'Refreshing...' : 'Refresh Map'}
+                      </button>
+                    )
+                  }
+                >
+                    {itineraryItems.length > 0 && itineraryItems.some(item => (item.latitude || item.lat) && (item.longitude || item.lng)) ? (
+                    <SmartTripMap 
+                      itinerary={itineraryItems
+                        .filter(item => (item.latitude || item.lat) && (item.longitude || item.lng))
+                        .map(item => ({
+                          id: item.id,
+                          title: item.title,
+                          location: item.location,
+                          lat: Number(item.latitude || item.lat),
+                          lng: Number(item.longitude || item.lng),
+                          day: item.day,
+                          order: item.order || 0,
+                          is_reached: item.is_reached
+                        }))
+                      }
+                      onMarkReached={handleMarkReached}
+                      isMember={isOrganizer || memberStatus === 'approved'}
+                    />
+                  ) : (
+                    <div className="p-12 text-center bg-gray-50 rounded-[3rem] border border-dashed border-gray-200">
+                      <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-indigo-600">
+                        <MapPin className="w-8 h-8" />
+                      </div>
+                      <h3 className="text-xl font-black text-gray-900 mb-2">
+                        {itineraryItems.length > 0 ? 'Fixing Map Coordinates...' : 'No Map Data Available'}
+                      </h3>
+                      <p className="text-gray-500 max-w-sm mx-auto">
+                        {itineraryItems.length > 0 
+                          ? "We found your activities, but they don't have map coordinates yet. Click below to automatically locate them."
+                          : "Add locations with coordinates in the Itinerary tab to visualize your trip path."}
+                      </p>
+                      
+                      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+                        {(isOrganizer || memberStatus === 'approved') && (
+                          <button
+                            onClick={() => setActiveTab('itinerary')}
+                            className="w-full sm:w-auto px-8 py-3 bg-white text-gray-900 border border-gray-200 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-50 transition-all shadow-sm"
+                          >
+                            Go to Itinerary
+                          </button>
+                        )}
+
+                        {isOrganizer && (
+                          <button
+                            onClick={handleSyncMap}
+                            disabled={isSyncingMap}
+                            className={`w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 ${isSyncingMap ? 'opacity-70 cursor-not-allowed' : ''}`}
+                          >
+                            {isSyncingMap ? (
+                              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <Navigation className="w-3 h-3" />
+                            )}
+                            {isSyncingMap 
+                              ? 'Locating Places...' 
+                              : (itineraryItems.length > 0 ? 'Fix Map Coordinates' : 'Generate Map from Itinerary')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </Section>
+              </div>
+            ) : (
+              <div className="space-y-12">
                 {isOrganizer && members.some(m => m.status === 'pending') && (
                   <Section title="Pending Requests" icon={AlertCircle} className="bg-amber-50/30 border-amber-100/50">
                     <div className="space-y-4">
@@ -1240,62 +1591,6 @@ const TripDetails: React.FC = () => {
                     ))}
                   </div>
                 </Section>
-              </div>
-            ) : (
-              <div className="space-y-12">
-                {trip.itinerary && (
-                  <CollapsibleCard 
-                    title="Itinerary Summary" 
-                    icon={MapIcon} 
-                    isOpen={expandedSections.itinerary} 
-                    onToggle={() => toggleSection('itinerary')}
-                    badge={`${parseItinerary(trip.itinerary).length} Days Journey`}
-                  >
-                    <div className="space-y-6 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-gray-100">
-                      {parseItinerary(trip.itinerary).map((day, idx) => (
-                        <div key={idx} className="relative pl-10">
-                          <div className="absolute left-0 top-0 w-8 h-8 bg-white border-2 border-indigo-600 rounded-full flex items-center justify-center z-10">
-                            <span className="text-[10px] font-black text-indigo-600">{day.day}</span>
-                          </div>
-                          <div className="bg-gray-50/50 p-6 rounded-[2rem] border border-gray-100 hover:bg-white hover:shadow-xl hover:shadow-gray-200/30 transition-all cursor-pointer group" onClick={() => toggleDay(idx)}>
-                            <div className="flex items-center justify-between mb-2">
-                              <h4 className="font-black text-gray-900 tracking-tight">Day {day.day}</h4>
-                              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-500 ${expandedDays[idx] ? 'rotate-180' : ''}`} />
-                            </div>
-                            {day.title && day.title !== 'Activities' && day.title !== 'Plan' && (
-                              <p className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-2">{day.title}</p>
-                            )}
-                            <AnimatePresence>
-                              {expandedDays[idx] && (
-                                <motion.div
-                                  initial={{ height: 0, opacity: 0 }}
-                                  animate={{ height: 'auto', opacity: 1 }}
-                                  exit={{ height: 0, opacity: 0 }}
-                                  className="pt-4 border-t border-gray-100 mt-4"
-                                >
-                                  <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed font-medium">
-                                    {day.content}
-                                  </p>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CollapsibleCard>
-                )}
-
-                <div className="bg-white p-10 md:p-12 rounded-[3rem] shadow-2xl shadow-gray-200/50 border border-gray-100">
-                  <ItineraryPlanner 
-                    tripId={id!} 
-                    isMember={memberStatus === 'approved' || isOrganizer} 
-                    isOrganizer={isOrganizer}
-                    initialItinerary={trip.itinerary}
-                    destination={trip.destination_city}
-                    travelStyle={trip.travel_style}
-                  />
-                </div>
               </div>
             )}
           </div>
