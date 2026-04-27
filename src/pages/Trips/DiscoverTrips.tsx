@@ -321,6 +321,12 @@ export const DiscoverTrips: React.FC = () => {
     const status = (trip.status || 'open').toLowerCase();
     if (status !== 'open' && status !== 'active') return false;
 
+    // Filter out trips that have already started or completed
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const tripStart = new Date(trip.start_date);
+    if (tripStart <= now) return false;
+
     const matchesSearch = (trip.destination_city?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
       (trip.destination_country?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
       (trip.starting_city?.toLowerCase() || '').includes(searchTerm.toLowerCase());
@@ -409,19 +415,29 @@ export const DiscoverTrips: React.FC = () => {
   const recommendedTrips = filteredTrips.filter(t => calculateCompatibility(t) && calculateCompatibility(t)! >= 80).slice(0, 3);
   const nearbyTrips = filteredTrips.filter(t => userLocation && t.destination_lat && calculateDistance(userLocation.lat, userLocation.lng, t.destination_lat, t.destination_lng) < 500).slice(0, 3);
   
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
   const weekendGetaways = trips.filter(t => {
     const start = new Date(t.start_date);
+    if (start <= now) return false;
     const end = new Date(t.end_date);
     const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
     const day = start.getDay(); // 5 = Friday, 6 = Saturday
     return duration <= 3 && (day === 5 || day === 6);
   }).slice(0, 3);
 
-  const adventurePicks = trips.filter(t => 
-    t.trip_types?.some((type: string) => ['Adventure', 'Trekking'].includes(type))
-  ).slice(0, 3);
+  const adventurePicks = trips.filter(t => {
+    const start = new Date(t.start_date);
+    if (start <= now) return false;
+    return t.trip_types?.some((type: string) => ['Adventure', 'Trekking'].includes(type));
+  }).slice(0, 3);
 
-  const budgetPicks = trips.filter(t => t.budget_max <= 5000).slice(0, 3);
+  const budgetPicks = trips.filter(t => {
+    const start = new Date(t.start_date);
+    if (start <= now) return false;
+    return t.budget_max <= 5000;
+  }).slice(0, 3);
 
   return (
     <div className="min-h-screen bg-white pb-32">

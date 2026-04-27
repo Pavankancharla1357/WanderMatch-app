@@ -83,8 +83,20 @@ export const TripCard: React.FC<TripCardProps> = ({ trip }) => {
   };
 
   const compatibility = calculateCompatibility();
-
   const navigate = useNavigate();
+
+  const getTripStatus = () => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const start = new Date(trip.start_date);
+    const end = new Date(trip.end_date);
+    
+    if (now > end) return 'Completed';
+    if (now >= start && now <= end) return 'Ongoing';
+    return null;
+  };
+
+  const tripStatus = getTripStatus();
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Prevent navigation if clicking on the organizer profile
@@ -253,6 +265,13 @@ export const TripCard: React.FC<TripCardProps> = ({ trip }) => {
             <span className="px-3 py-1.5 bg-white/90 backdrop-blur-md text-indigo-600 text-[9px] font-black rounded-lg uppercase tracking-widest shadow-sm">
               {trip.travel_style?.replace('_', ' ')}
             </span>
+            {tripStatus && (
+              <span className={`px-3 py-1.5 backdrop-blur-md text-white text-[9px] font-black rounded-lg uppercase tracking-widest shadow-sm ${
+                tripStatus === 'Completed' ? 'bg-gray-600/90' : 'bg-emerald-600/90'
+              }`}>
+                {tripStatus === 'Ongoing' ? 'Live Now' : tripStatus}
+              </span>
+            )}
           </div>
         </div>
 

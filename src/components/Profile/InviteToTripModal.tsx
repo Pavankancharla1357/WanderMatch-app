@@ -182,7 +182,7 @@ export const InviteToTripModal: React.FC<InviteToTripModalProps> = ({ targetUser
 
   const shareToWhatsApp = () => {
     if (!generatedLink) return;
-    const text = `Hey! Join my trip to ${myTrips.find(t => invitedTrips.has(t.id))?.destination_city} on YatraMitra: ${generatedLink}`;
+    const text = `Hey! Join my trip to ${myTrips.find(t => invitedTrips.has(t.id))?.destination_city} on TripBridge: ${generatedLink}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 

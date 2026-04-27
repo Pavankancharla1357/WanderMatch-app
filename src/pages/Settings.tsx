@@ -458,7 +458,7 @@ export const Settings: React.FC = () => {
 
       {/* Version Info */}
       <div className="mt-12 text-center">
-        <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest">YatraMitra v1.2.0</p>
+        <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest">TripBridge v1.2.0</p>
         <p className="text-[10px] text-gray-400 mt-1">Made with ❤️ for travelers</p>
       </div>
     </div>
@@ -1336,7 +1336,7 @@ export const Settings: React.FC = () => {
         </div>
 
         <div className="space-y-6 pt-6 border-t border-gray-100">
-          <h3 className="text-lg font-bold text-gray-900">About YatraMitra</h3>
+          <h3 className="text-lg font-bold text-gray-900">About TripBridge</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm font-bold text-gray-900">Version</p>
@@ -1418,7 +1418,7 @@ export const Settings: React.FC = () => {
 
       <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Feedback</h3>
-        <p className="text-xs text-gray-500 mb-6">Help us improve YatraMitra by sharing your thoughts.</p>
+        <p className="text-xs text-gray-500 mb-6">Help us improve TripBridge by sharing your thoughts.</p>
         <form onSubmit={handleSubmitFeedback} className="space-y-4">
           <textarea
             rows={4}
@@ -1852,14 +1852,14 @@ export const Settings: React.FC = () => {
               </h3>
               <p className="text-sm text-gray-500 mb-8">
                 {contactType === 'email' 
-                  ? 'Our support team typically responds within 24 hours. Send your query to support@yatramitra.com'
+                  ? 'Our support team typically responds within 24 hours. Send your query to support@tripbridge.com'
                   : 'Connect with our support agents for real-time assistance. Available 9 AM - 6 PM IST.'}
               </p>
               <div className="flex flex-col space-y-3">
                 <button
                   onClick={() => {
                     if (contactType === 'email') {
-                      window.location.href = 'mailto:support@yatramitra.com';
+                      window.location.href = 'mailto:support@tripbridge.com';
                     } else {
                       toast.info('Connecting to a support agent...');
                       setTimeout(() => toast.success('Support agent connected! (Demo)'), 2000);

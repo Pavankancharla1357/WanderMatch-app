@@ -1,6 +1,6 @@
-# YatraMitra Database Design
+# TripBridge Database Design
 
-This document outlines the dual-database architecture for YatraMitra, combining the strengths of PostgreSQL for structured relational data and MongoDB for high-frequency messaging.
+This document outlines the dual-database architecture for TripBridge, combining the strengths of PostgreSQL for structured relational data and MongoDB for high-frequency messaging.
 
 ## PostgreSQL (Relational Data)
 Used for core business logic, user management, and financial tracking where ACID compliance and complex joins are required.

@@ -154,7 +154,7 @@ const ExpertTravelPlanner: React.FC = () => {
               <Compass className="text-white w-4 h-4" />
             </div>
             <h1 className="text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-800">
-              YatraMitra AI
+              TripBridge AI
             </h1>
           </div>
           <button 

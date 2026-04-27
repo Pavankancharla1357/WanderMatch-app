@@ -250,7 +250,7 @@ export const ProfilePage: React.FC = () => {
           await addDoc(collection(db, 'messages'), {
             channel_id: newChannelRef.id,
             sender_id: 'system',
-            sender_name: 'YatraMitra Bot',
+            sender_name: 'TripBridge Bot',
             content: `👋 Hi! ${profile?.name || 'Someone'} started a conversation with you.`,
             message_type: 'system',
             created_at: serverTimestamp()

@@ -247,6 +247,20 @@ const TripDetails: React.FC = () => {
     setExpandedDays(prev => ({ ...prev, [day]: !prev[day] }));
   };
 
+  const getTripStatus = () => {
+    if (!trip) return null;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const start = new Date(trip.start_date);
+    const end = new Date(trip.end_date);
+    
+    if (now > end) return { label: 'Completed', color: 'bg-gray-500', text: 'text-gray-500' };
+    if (now >= start && now <= end) return { label: 'Ongoing', color: 'bg-emerald-500', text: 'text-emerald-500' };
+    return { label: 'Upcoming', color: 'bg-indigo-500', text: 'text-indigo-500' };
+  };
+
+  const tripStatus = getTripStatus();
+
   const parseItinerary = (text: any) => {
     if (!text) return [];
     
@@ -373,7 +387,7 @@ const TripDetails: React.FC = () => {
         await addDoc(collection(db, 'messages'), {
           channel_id: newChannelRef.id,
           sender_id: 'system',
-          sender_name: 'YatraMitra Bot',
+          sender_name: 'TripBridge Bot',
           content: `👋 Hi! ${currentUserProfile?.name || 'Someone'} is interested in your trip to ${trip.destination_city} and started a conversation.`,
           message_type: 'system',
           created_at: serverTimestamp()
@@ -1108,9 +1122,19 @@ const TripDetails: React.FC = () => {
               <span className="px-4 py-1.5 bg-white/10 backdrop-blur-md border border-white/20 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-full">
                 {trip.travel_style?.replace('_', ' ')}
               </span>
-              <span className="px-4 py-1.5 bg-emerald-500/20 backdrop-blur-md border border-emerald-500/30 text-emerald-200 text-[10px] font-black uppercase tracking-[0.2em] rounded-full">
-                {trip.status}
-              </span>
+              {tripStatus && (
+                <span className={`px-4 py-1.5 backdrop-blur-md border border-transparent text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-full flex items-center shadow-lg ${tripStatus.color}`}>
+                  {tripStatus.label === 'Ongoing' ? (
+                    <>
+                      <span className="relative flex h-2 w-2 mr-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                      </span>
+                      Live Now
+                    </>
+                  ) : tripStatus.label}
+                </span>
+              )}
               {trip.is_women_only && (
                 <span className="px-4 py-1.5 bg-pink-500/20 backdrop-blur-md border border-pink-500/30 text-pink-200 text-[10px] font-black uppercase tracking-[0.2em] rounded-full flex items-center">
                   <Heart className="w-3 h-3 mr-2 fill-pink-200" />

@@ -61,7 +61,7 @@ export const GemmaPlayground: React.FC = () => {
           model: "gemini-flash-latest",
           contents: contents,
           config: {
-            systemInstruction: "You are a helpful travel assistant. You are part of the YatraMitra platform.",
+            systemInstruction: "You are a helpful travel assistant. You are part of the TripBridge platform.",
           }
         });
         return { model: 'gemini', output: response.text };

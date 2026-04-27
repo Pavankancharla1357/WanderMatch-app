@@ -94,7 +94,7 @@ export const LocationAutocomplete: React.FC<LocationAutocompleteProps> = ({
           signal: abortControllerRef.current.signal,
           headers: {
             'Accept-Language': 'en-US,en;q=0.9',
-            'User-Agent': 'YatraMitra-Travel-App-V2'
+            'User-Agent': 'TripBridge-Travel-App-V2'
           }
         }
       );

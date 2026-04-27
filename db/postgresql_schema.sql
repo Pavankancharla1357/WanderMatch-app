@@ -1,4 +1,4 @@
--- PostgreSQL Schema for YatraMitra
+-- PostgreSQL Schema for TripBridge
 
 -- Users Table: Core profile and authentication
 CREATE TABLE users (

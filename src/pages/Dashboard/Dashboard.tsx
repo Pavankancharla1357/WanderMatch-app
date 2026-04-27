@@ -260,8 +260,15 @@ export const Dashboard: React.FC = () => {
                activeFilter === 'saved' ? savedTrips : [];
     
     // Filter for past trips if selected
+    const now = new Date();
+    
     if (activeFilter === 'past') {
-      list = [...myTrips, ...joinedTrips].filter(t => new Date(t.start_date) < new Date());
+      list = [...myTrips, ...joinedTrips].filter(t => new Date(t.end_date) < now);
+    }
+
+    // Optionally filter out past trips from 'my' and 'joined' views if they would be cluttered
+    if (activeFilter === 'my' || activeFilter === 'joined') {
+      list = list.filter(t => new Date(t.end_date) >= now);
     }
 
     // Sort

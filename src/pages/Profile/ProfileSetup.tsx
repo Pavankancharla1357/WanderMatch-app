@@ -102,7 +102,7 @@ export const ProfileSetup: React.FC = () => {
         return;
       }
       if (parseInt(formData.age) < 18) {
-        alert("You must be at least 18 years old to use YatraMitra.");
+        alert("You must be at least 18 years old to use TripBridge.");
         return;
       }
     }

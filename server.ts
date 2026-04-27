@@ -67,7 +67,7 @@ async function startServer() {
 
   // API Routes
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", message: "YatraMitra API is healthy" });
+    res.json({ status: "ok", message: "TripBridge API is healthy" });
   });
 
   // Connections API

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">YatraMitra</string>
-    <string name="title_activity_main">YatraMitra</string>
-    <string name="package_name">com.yatramitra.app</string>
-    <string name="custom_url_scheme">com.yatramitra.app</string>
+    <string name="app_name">TripBridge</string>
+    <string name="title_activity_main">TripBridge</string>
+    <string name="package_name">com.tripbridge.app</string>
+    <string name="custom_url_scheme">com.tripbridge.app</string>
 </resources>

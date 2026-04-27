@@ -17,7 +17,7 @@ export const geocodeLocation = async (query: string): Promise<GeocodeResult | nu
       {
         headers: {
           'Accept-Language': 'en-US,en;q=0.9',
-          'User-Agent': 'YatraMitra-Travel-App'
+          'User-Agent': 'TripBridge-Travel-App'
         }
       }
     );

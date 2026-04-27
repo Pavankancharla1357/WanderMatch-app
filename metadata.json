@@ -1,6 +1,6 @@
 {
-  "name": "YatraMitra",
-  "description": "Plan trips, store travel documents, and connect with travelers using YatraMitra — your all-in-one AI travel companion.",
+  "name": "TripBridge",
+  "description": "Plan trips, store travel documents, and connect with travelers using TripBridge — your all-in-one AI travel companion.",
   "requestFramePermissions": [
     "camera",
     "geolocation"

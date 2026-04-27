@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.yatramitra.app',
-  appName: 'YatraMitra',
+  appId: 'com.tripbridge.app',
+  appName: 'TripBridge',
   webDir: 'dist',
   plugins: {
     SplashScreen: {

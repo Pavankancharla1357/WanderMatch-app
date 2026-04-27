@@ -25,11 +25,13 @@ export const Home: React.FC = () => {
     const fetchLiveTrips = async () => {
       setTripsLoading(true);
       try {
+        const today = new Date().toISOString().split('T')[0];
         // Fetch public, open trips
         const q = query(
           collection(db, 'trips'),
           where('status', '==', 'open'),
           where('settings.privacy', '==', 'public'),
+          where('start_date', '>', today),
           limit(3)
         );
         const snapshot = await getDocs(q);
@@ -638,7 +640,7 @@ export const Home: React.FC = () => {
             <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200">
               <Compass className="text-white w-7 h-7" />
             </div>
-            <span className="text-2xl font-black tracking-tighter text-gray-900">YatraMitra</span>
+            <span className="text-2xl font-black tracking-tighter text-gray-900">TripBridge</span>
           </div>
           <div className="flex space-x-8 text-sm font-bold text-gray-500 uppercase tracking-widest">
             <a href="#" className="hover:text-indigo-600">Privacy</a>
@@ -646,7 +648,7 @@ export const Home: React.FC = () => {
             <a href="#" className="hover:text-indigo-600">Contact</a>
           </div>
           <div className="text-gray-400 text-sm font-medium">
-            © 2026 YatraMitra. All rights reserved.
+            © 2026 TripBridge. All rights reserved.
           </div>
         </div>
       </footer>

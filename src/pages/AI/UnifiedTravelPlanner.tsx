@@ -276,7 +276,7 @@ Make it engaging and easy to read.`;
               <Sparkles className="text-white w-7 h-7" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-gray-900 tracking-tight">YatraMitra AI</h1>
+              <h1 className="text-2xl font-black text-gray-900 tracking-tight">TripBridge AI</h1>
               <p className="text-sm font-bold text-gray-500">Plan your perfect journey with AI</p>
             </div>
           </div>

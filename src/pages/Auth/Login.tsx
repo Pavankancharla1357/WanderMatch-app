@@ -48,7 +48,7 @@ export const Login: React.FC = () => {
           </div>
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 tracking-tight">
-          Welcome back to YatraMitra
+          Welcome back to TripBridge
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">
           Or{' '}

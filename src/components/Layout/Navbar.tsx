@@ -49,7 +49,7 @@ export const Navbar: React.FC = () => {
               <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200">
                 <Compass className="text-white w-6 h-6" />
               </div>
-              <span className="text-xl font-bold text-gray-900 tracking-tight">YatraMitra</span>
+              <span className="text-xl font-bold text-gray-900 tracking-tight">TripBridge</span>
             </Link>
           </div>
 
