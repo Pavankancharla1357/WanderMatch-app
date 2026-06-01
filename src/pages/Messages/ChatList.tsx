@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { db } from '../../firebase';
 import { collection, query, where, getDocs, orderBy, getDoc, doc, onSnapshot, limit, getCountFromServer, setDoc } from 'firebase/firestore';
 import { useAuth } from '../../components/Auth/AuthContext';
-import { MessageSquare, Search, ChevronRight, Clock, Users, Pin, BellOff, Archive, Trash2, MoreVertical, Zap } from 'lucide-react';
+import { MessageSquare, Search, ChevronRight, Clock, Users, Pin, BellOff, Archive, Trash2, MoreVertical, Zap, Phone, Video } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 
@@ -146,6 +146,7 @@ export const ChatList: React.FC = () => {
             lastMessage: (data.type === 'direct' && !isConnected) ? 'Connect to view messages' : (data.last_message || 'No messages yet'),
             lastMessageTime: data.last_message_time || data.updated_at,
             participants: data.participants,
+            active_call: data.active_call,
             icon,
             photoUrl,
             otherUserId,
@@ -666,6 +667,12 @@ const ChatItem: React.FC<ChatItemProps> = ({
               <h3 className={`truncate ${isUnread ? 'font-black text-gray-900' : 'font-bold text-gray-700'}`}>
                 {highlightText(chat.name, searchQuery)}
               </h3>
+              {chat.active_call && (
+                <div className="flex items-center space-x-1 px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-md animate-pulse shrink-0">
+                  {chat.active_call.type === 'video' ? <Video className="w-2.5 h-2.5" /> : <Phone className="w-2.5 h-2.5" />}
+                  <span className="text-[8px] font-black uppercase tracking-tighter">Live</span>
+                </div>
+              )}
               {chat.type === 'group' && (
                 <div className="flex items-center space-x-1 px-1.5 py-0.5 bg-gray-100 rounded text-[8px] font-black text-gray-400 uppercase tracking-tighter">
                   <Users className="w-2 h-2" />

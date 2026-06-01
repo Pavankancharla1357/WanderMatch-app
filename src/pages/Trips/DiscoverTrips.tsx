@@ -144,10 +144,15 @@ export const DiscoverTrips: React.FC = () => {
   useEffect(() => {
     const fetchUserCount = async () => {
       try {
-        const snapshot = await getCountFromServer(collection(db, 'users'));
+        const usersCol = collection(db, 'users');
+        const snapshot = await getCountFromServer(usersCol);
         setUserCount(snapshot.data().count);
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error fetching user count:", e);
+        // Fallback to a reasonable number or don't show the badge
+        if (e.code === 'permission-denied') {
+          console.warn("Permission denied for user count. This might be due to security rules.");
+        }
       }
     };
     fetchUserCount();

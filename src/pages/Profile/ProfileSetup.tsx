@@ -5,8 +5,9 @@ import { db } from '../../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, MapPin, Heart, Plane, Check, Smartphone, Camera } from 'lucide-react';
+import { User, MapPin, Heart, Plane, Check, Smartphone, Camera, Loader2 } from 'lucide-react';
 import { ImageUpload } from '../../components/Common/ImageUpload';
+import { toast } from 'sonner';
 
 declare global {
   interface Window {
@@ -20,57 +21,55 @@ export const ProfileSetup: React.FC = () => {
   const [step, setStep] = useState(1);
   const [hasSetInitialStep, setHasSetInitialStep] = useState(false);
   const [initializing, setInitializing] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [formData, setFormData] = useState({
-    name: profile?.name || user?.displayName || '',
-    age: profile?.age?.toString() || '',
-    location_city: profile?.location_city || '',
-    location_country: profile?.location_country || '',
-    bio: profile?.bio || '',
-    gender: profile?.gender || 'prefer_not_to_say',
+    name: '',
+    age: '',
+    location_city: '',
+    location_country: '',
+    bio: '',
+    gender: 'prefer_not_to_say',
     social_links: {
-      instagram: profile?.social_links?.instagram || '',
-      linkedin: profile?.social_links?.linkedin || '',
-      twitter: profile?.social_links?.twitter || '',
-      website: profile?.social_links?.website || '',
+      instagram: '',
+      linkedin: '',
+      twitter: '',
+      website: '',
     },
-    interests: profile?.interests || [] as string[],
-    travel_style: profile?.travel_style || 'mid_range',
-    phone_number: profile?.phone_number || '',
-    photo_url: profile?.photo_url || user?.photoURL || '',
+    interests: [] as string[],
+    travel_style: 'mid_range',
+    phone_number: '',
+    photo_url: '',
   });
 
+  // Only sync once on initial profile load
   useEffect(() => {
-    if (profile) {
-      console.log('Profile loaded in Setup:', profile);
-      // If phone starts with +91, strip it for the input field
+    if (profile && !isInitialized) {
+      console.log('Initializing form with profile:', profile);
       const displayPhone = profile.phone_number?.startsWith('+91') 
         ? profile.phone_number.replace('+91', '') 
         : profile.phone_number || '';
 
-      setFormData(prev => ({
-        ...prev,
-        name: profile.name || prev.name,
-        age: profile.age ? profile.age.toString() : prev.age,
-        gender: profile.gender || prev.gender,
-        location_city: profile.location_city || prev.location_city,
-        location_country: profile.location_country || prev.location_country,
-        bio: profile.bio || prev.bio,
-        interests: profile.interests || prev.interests,
-        travel_style: profile.travel_style || prev.travel_style,
+      setFormData({
+        name: profile.name || user?.displayName || '',
+        age: profile.age ? profile.age.toString() : '',
+        gender: profile.gender || 'prefer_not_to_say',
+        location_city: profile.location_city || '',
+        location_country: profile.location_country || '',
+        bio: profile.bio || '',
+        interests: profile.interests || [],
+        travel_style: profile.travel_style || 'mid_range',
         phone_number: displayPhone,
-        photo_url: profile.photo_url || prev.photo_url,
+        photo_url: profile.photo_url || user?.photoURL || '',
         social_links: {
-          instagram: profile.social_links?.instagram || prev.social_links.instagram,
-          linkedin: profile.social_links?.linkedin || prev.social_links.linkedin,
-          twitter: profile.social_links?.twitter || prev.social_links.twitter,
-          website: profile.social_links?.website || prev.social_links.website,
+          instagram: profile.social_links?.instagram || '',
+          linkedin: profile.social_links?.linkedin || '',
+          twitter: profile.social_links?.twitter || '',
+          website: profile.social_links?.website || '',
         },
-      }));
+      });
 
       // Initialize step based on what's already filled
-      // Step 1: Basic Info (age)
-      // Step 2: Travel Style
-      // Step 3: Interests
       if (!hasSetInitialStep) {
         if (profile.setup_completed) {
           if (window.location.pathname === '/profile/setup') {
@@ -83,26 +82,38 @@ export const ProfileSetup: React.FC = () => {
         }
         setHasSetInitialStep(true);
       }
+      setIsInitialized(true);
       setInitializing(false);
-    } else if (profile === null) {
+    } else if (profile === null && !isInitialized) {
+      setFormData(prev => ({
+        ...prev,
+        name: user?.displayName || '',
+        photo_url: user?.photoURL || '',
+      }));
       setInitializing(false);
+      setIsInitialized(true);
+      setHasSetInitialStep(true);
     }
-  }, [profile, navigate]);
+  }, [profile, user, isInitialized, hasSetInitialStep, navigate]);
 
   // Remove the auto-redirect to /discover to prevent unwanted navigation on refresh
   // The user will be redirected only when they explicitly complete the setup
 
   const handleNextStep = async (nextStep: number) => {
-    if (!user) return;
+    if (!user) {
+      toast.error("You must be logged in to continue.");
+      return;
+    }
 
     // Validation for Step 1
     if (step === 1) {
-      if (!formData.name || !formData.age || !formData.location_city || !formData.location_country) {
-        alert("Please fill in all required fields (Name, Age, City, Country).");
+      if (!formData.name?.trim() || !formData.age || !formData.location_city?.trim() || !formData.location_country?.trim()) {
+        toast.error("Please fill in all required fields (Name, Age, City, Country).");
         return;
       }
-      if (parseInt(formData.age) < 18) {
-        alert("You must be at least 18 years old to use TripBridge.");
+      const ageVal = parseInt(formData.age);
+      if (isNaN(ageVal) || ageVal < 18) {
+        toast.error("You must be at least 18 years old to use TripBridge.");
         return;
       }
     }
@@ -110,15 +121,19 @@ export const ProfileSetup: React.FC = () => {
     // Validation for Step 2
     if (step === 2) {
       if (!formData.travel_style) {
-        alert("Please select a travel style.");
+        toast.error("Please select a travel style.");
         return;
       }
     }
 
+    setSubmitting(true);
+    const toastId = toast.loading('Saving your information...');
     const path = `users/${user.uid}`;
+    
     try {
       const dataToSave = { ...formData };
-      // Ensure phone number is stored in E.164 format if it's a 10-digit Indian number
+      const ageToInt = parseInt(formData.age) || 0;
+      
       if (dataToSave.phone_number && dataToSave.phone_number.length === 10 && !dataToSave.phone_number.startsWith('+')) {
         dataToSave.phone_number = `+91${dataToSave.phone_number}`;
       }
@@ -127,34 +142,46 @@ export const ProfileSetup: React.FC = () => {
         ...dataToSave,
         uid: user.uid,
         email: user.email,
-        age: parseInt(formData.age) || 0,
+        age: ageToInt,
         updated_at: new Date().toISOString(),
       }, { merge: true });
       
-      await refreshProfile();
+      toast.success('Progress saved!', { id: toastId });
       setStep(nextStep);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
+      console.error('Save error:', error);
+      toast.error('Failed to save progress. Please try again.', { id: toastId });
       handleFirestoreError(error, OperationType.WRITE, path);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleUpdate = async () => {
-    if (!user) return;
+    if (!user) {
+      toast.error("You must be logged in to complete setup.");
+      return;
+    }
 
     // Validation for Step 3
     if (formData.interests.length === 0) {
-      alert("Please select at least one interest.");
+      toast.error("Please select at least one interest.");
       return;
     }
-    if (!formData.bio || formData.bio.length < 10) {
-      alert("Please provide a short bio (at least 10 characters).");
+    if (!formData.bio || formData.bio.trim().length < 10) {
+      toast.error("Please provide a short bio (at least 10 characters).");
       return;
     }
 
+    setSubmitting(true);
+    const toastId = toast.loading('Finalizing your profile...');
     const path = `users/${user.uid}`;
+    
     try {
       const dataToSave = { ...formData };
-      // Ensure phone number is stored in E.164 format if it's a 10-digit Indian number
+      const ageToInt = parseInt(formData.age) || 0;
+
       if (dataToSave.phone_number && dataToSave.phone_number.length === 10 && !dataToSave.phone_number.startsWith('+')) {
         dataToSave.phone_number = `+91${dataToSave.phone_number}`;
       }
@@ -163,18 +190,23 @@ export const ProfileSetup: React.FC = () => {
         ...dataToSave,
         uid: user.uid,
         email: user.email,
-        age: parseInt(formData.age) || 0,
+        age: ageToInt,
         updated_at: new Date().toISOString(),
         reputation_score: profile?.reputation_score || 0,
         is_email_verified: profile?.is_email_verified || false,
         is_id_verified: profile?.is_id_verified || false,
         created_at: profile?.created_at || new Date().toISOString(),
-        setup_completed: true, // Mark setup as completed
+        setup_completed: true, 
       }, { merge: true });
-      await refreshProfile();
+      
+      toast.success('Profile setup completed!', { id: toastId });
       navigate('/discover');
     } catch (error) {
+      console.error('Finalize error:', error);
+      toast.error('Failed to complete setup.', { id: toastId });
       handleFirestoreError(error, OperationType.WRITE, path);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -211,12 +243,14 @@ export const ProfileSetup: React.FC = () => {
           ))}
         </div>
 
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100"
-        >
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={step}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100"
+          >
           {step === 1 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900">Basic Info</h2>
@@ -313,9 +347,17 @@ export const ProfileSetup: React.FC = () => {
 
               <button
                 onClick={() => handleNextStep(2)}
-                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all"
+                disabled={submitting}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                Continue
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Continue'
+                )}
               </button>
             </div>
           )}
@@ -346,9 +388,17 @@ export const ProfileSetup: React.FC = () => {
                 </button>
                 <button
                   onClick={() => handleNextStep(3)}
-                  className="w-2/3 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all"
+                  disabled={submitting}
+                  className="w-2/3 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  Continue
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Continue'
+                  )}
                 </button>
               </div>
             </div>
@@ -451,15 +501,24 @@ export const ProfileSetup: React.FC = () => {
                 </button>
                 <button
                   onClick={handleUpdate}
-                  className="w-2/3 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all"
+                  disabled={submitting}
+                  className="w-2/3 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  Complete Setup
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Completing...
+                    </>
+                  ) : (
+                    'Complete Setup'
+                  )}
                 </button>
               </div>
             </div>
           )}
         </motion.div>
-      </div>
+      </AnimatePresence>
     </div>
-  );
+  </div>
+);
 };

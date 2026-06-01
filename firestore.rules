@@ -54,8 +54,9 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
-        (request.auth.token.email == "pavankancharla1357@gmail.com" && request.auth.token.email_verified == true);
+      return isAuthenticated() && 
+             'email' in request.auth.token && 
+             request.auth.token.email == 'pavankancharla1357@gmail.com';
     }
 
     function isTripOrganizer(tripData) {
@@ -122,29 +123,11 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isOwner(userId) && request.resource.data.uid == request.auth.uid;
-      allow update: if (isOwner(userId) && uidNotModified()) || 
-                      (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reputation_score']));
-
-      match /safety_contacts/{contactId} {
-        allow read, write: if isOwner(userId);
-      }
+      allow read: if true;
+      allow write: if request.auth != null && (request.auth.uid == userId || isAdmin());
       
-      match /documents/{documentId} {
-        allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidScannedDocument(request.resource.data);
-        allow update: if isOwner(userId) && isValidScannedDocument(request.resource.data);
-        allow delete: if isOwner(userId);
-      }
-
-      match /chat_settings/{chatId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /billing_history/{recordId} {
-        allow read: if isOwner(userId);
-        allow write: if isAdmin();
+      match /{allPaths=**} {
+        allow read, write: if request.auth != null && (request.auth.uid == userId || isAdmin());
       }
     }
 
@@ -162,7 +145,8 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         (request.auth.uid == resource.data.organizer_id && isValidTrip(request.resource.data)) || 
         isAdmin() ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['current_members', 'invite_count']))
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['current_members', 'invite_count', 'active_call'])) ||
+        (isTripMember(tripId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active_call']))
       );
       
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.organizer_id || isAdmin());

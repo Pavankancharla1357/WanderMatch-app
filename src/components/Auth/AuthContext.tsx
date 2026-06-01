@@ -68,6 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatePresence = async (online: boolean) => {
       try {
         await setDoc(docRef, {
+          uid: user.uid,
           is_online: online,
           last_seen: new Date().toISOString()
         }, { merge: true });

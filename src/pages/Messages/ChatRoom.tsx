@@ -6,8 +6,9 @@ import { useAuth } from '../../components/Auth/AuthContext';
 import { MessageItem } from '../../components/Chat/MessageItem';
 import { ChatInput } from '../../components/Chat/ChatInput';
 import { PollCreator } from '../../components/Chat/PollCreator';
-import { ChevronLeft, Info, Phone, Video, MoreVertical, Sparkles, Calendar, BarChart2, Clock } from 'lucide-react';
-import { addDoc, serverTimestamp } from 'firebase/firestore';
+import { VideoCall } from '../../components/Chat/VideoCall';
+import { ChevronLeft, Info, Phone, Video, MoreVertical, Sparkles, Calendar, BarChart2, Clock, PhoneIncoming, X } from 'lucide-react';
+import { addDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const ChatRoom: React.FC = () => {
@@ -21,7 +22,56 @@ export const ChatRoom: React.FC = () => {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPollCreator, setShowPollCreator] = useState(false);
+  const [activeCall, setActiveCall] = useState<any>(null);
+  const [isJoiningCall, setIsJoiningCall] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!channelId || !user || !user.uid) return;
+
+    // Listen for call status
+    // If it's a trip group, it's on doc(db, 'trips', channelId)
+    // If it's a DM, it's on doc(db, 'channels', channelId)
+    // Both are handled in the existing onSnapshot listeners below
+  }, [channelId, user]);
+
+  const startCall = async (type: 'video' | 'audio') => {
+    if (!channelId || !user) return;
+    
+    const roomName = `${channelInfo?.name?.replace(/\s+/g, '-') || 'TripBridge'}-${channelId.substring(0, 8)}-${Date.now()}`;
+    const callData = {
+      room_name: roomName,
+      type,
+      started_at: new Date().toISOString(),
+      started_by: user.uid,
+      started_by_name: user.displayName || 'Traveler'
+    };
+
+    try {
+      if (channelInfo?.type === 'group') {
+        await updateDoc(doc(db, 'trips', channelId), { active_call: callData });
+      } else {
+        await updateDoc(doc(db, 'channels', channelId), { active_call: callData });
+      }
+      setIsJoiningCall(true);
+    } catch (error) {
+      console.error('Error starting call:', error);
+    }
+  };
+
+  const endCall = async () => {
+    if (!channelId || !user) return;
+    try {
+      if (channelInfo?.type === 'group') {
+        await updateDoc(doc(db, 'trips', channelId), { active_call: deleteField() });
+      } else {
+        await updateDoc(doc(db, 'channels', channelId), { active_call: deleteField() });
+      }
+    } catch (error) {
+      console.error('Error ending call:', error);
+    }
+    setIsJoiningCall(false);
+  };
 
   useEffect(() => {
     if (!channelId || !user || !user.uid) return;
@@ -132,6 +182,7 @@ export const ChatRoom: React.FC = () => {
         const tripData = snap.data();
         setChannelInfo({ ...tripData, type: 'group' });
         setIsOrganizer(tripData.organizer_id === user.uid);
+        setActiveCall(tripData.active_call || null);
         setLoading(false);
       }
     });
@@ -150,6 +201,7 @@ export const ChatRoom: React.FC = () => {
     const unsubscribeChannel = onSnapshot(doc(db, 'channels', channelId), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
+        setActiveCall(data.active_call || null);
         if (data.type === 'direct') {
           const otherUserId = data.participants.find((id: string) => id !== user.uid) || data.participants[0];
           
@@ -297,10 +349,18 @@ export const ChatRoom: React.FC = () => {
               <BarChart2 className="w-5 h-5" />
             </button>
           )}
-          <button className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
+          <button 
+            onClick={() => startCall('audio')}
+            className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"
+            title="Audio Call"
+          >
             <Phone className="w-5 h-5" />
           </button>
-          <button className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
+          <button 
+            onClick={() => startCall('video')}
+            className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"
+            title="Video Call"
+          >
             <Video className="w-5 h-5" />
           </button>
           <button className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
@@ -378,6 +438,61 @@ export const ChatRoom: React.FC = () => {
               onClose={() => setShowPollCreator(false)} 
             />
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Video Call Interface */}
+      <AnimatePresence>
+        {isJoiningCall && activeCall && (
+          <VideoCall
+            roomName={activeCall.room_name}
+            displayName={user?.displayName || 'Traveler'}
+            email={user?.email || ''}
+            onClose={() => setIsJoiningCall(false)}
+            type={activeCall.type}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Active Call Notification Banner */}
+      <AnimatePresence>
+        {activeCall && !isJoiningCall && (
+          <motion.div
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="absolute top-20 left-4 right-4 z-40"
+          >
+            <div className="bg-indigo-600 text-white p-4 rounded-2xl shadow-xl flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                  {activeCall.type === 'video' ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
+                </div>
+                <div>
+                  <p className="text-sm font-black whitespace-nowrap">Live {activeCall.type} Call</p>
+                  <p className="text-[10px] font-bold text-indigo-100 uppercase tracking-widest">Started by {activeCall.started_by_name}</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => setIsJoiningCall(true)}
+                  className="px-4 py-2 bg-white text-indigo-600 rounded-xl text-xs font-black shadow-sm flex items-center space-x-2"
+                >
+                  <PhoneIncoming className="w-4 h-4" />
+                  <span>JOIN</span>
+                </button>
+                {activeCall.started_by === user?.uid && (
+                  <button 
+                    onClick={endCall}
+                    className="p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors"
+                    title="End Call for Everyone"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

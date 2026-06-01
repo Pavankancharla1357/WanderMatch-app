@@ -163,9 +163,8 @@ export const Home: React.FC = () => {
 
               <div className="flex flex-col sm:flex-row items-center gap-8">
                 <div className="flex items-center gap-3 px-6 py-3 bg-black/20 backdrop-blur-md rounded-full border border-white/10">
-                  <span className="flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  <span className="flex h-3 w-3 text-emerald-500">
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-current"></span>
                   </span>
                   <span className="text-white font-black text-sm tracking-wide">🔥 120+ travelers joined this week</span>
                 </div>

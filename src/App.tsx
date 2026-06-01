@@ -32,6 +32,7 @@ import { ChatRoom } from './pages/Messages/ChatRoom';
 import { BuddyFinder } from './pages/Feed/BuddyFinder';
 import { Notifications } from './pages/Notifications/Notifications';
 import { Settings } from './pages/Settings';
+import { GlobalCallObserver } from './components/Chat/GlobalCallObserver';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db } from './firebase';
 import { toast, Toaster } from 'sonner';
@@ -175,6 +176,7 @@ export default function App() {
         <ThemeManager />
         <Router>
           <NotificationListener />
+          <GlobalCallObserver />
           <ScrollToTop />
           <div className="min-h-screen bg-gray-50 pb-20 md:pb-0">
             <Toaster position="top-center" richColors closeButton />
